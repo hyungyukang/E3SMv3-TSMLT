@@ -122,7 +122,7 @@ contains
     use mo_nln_matrix, only : nlnmat
     use mo_lu_factor, only : lu_fac
     use mo_lu_solve, only : lu_slv
-    use mo_prod_loss, only : imp_prod_loss
+    use mo_prod_loss, only : imp_prod_loss_blk
     use mo_indprd, only : indprd
     use time_manager, only : get_nstep
     use perf_mod, only : t_startf, t_stopf
@@ -131,7 +131,6 @@ contains
     ! ... dummy args
     !-----------------------------------------------------------------------
     integer, intent(in) :: ncol ! columns in chunck
-    integer, intent(in) :: pver
     integer, intent(in) :: lchnk ! chunk id
     real(r8), intent(in) :: delt ! time step (s)
     real(r8), intent(in) :: reaction_rates(ncol,pver,max(1,rxntot)) ! rxt rates (1/cm^3/s)
@@ -140,8 +139,12 @@ contains
     real(r8), intent(inout) :: base_sol(ncol,pver,gas_pcnst) ! species mixing ratios (vmr)
     real(r8), intent(in) :: xhnm(ncol,pver)
     integer, intent(in) :: ltrop(ncol) ! chemistry troposphere boundary (index)
-!   real(r8), intent(out) :: prod_out(ncol*pver,max(1,clscnt4))
-!   real(r8), intent(out) :: loss_out(ncol*pver,max(1,clscnt4))
+    real(r8) :: prod_out(ncol*pver,max(1,clscnt4))
+    real(r8) :: loss_out(ncol*pver,max(1,clscnt4))
+    real(r8) :: reaction_rates1d(ncol*pver,max(1,rxntot)) ! rxt rates (1/cm^3/s)
+    real(r8) :: extfrc1d(ncol*pver,max(1,extcnt)) ! external in-situ forcing (1/cm^3/s)
+    real(r8) :: het_rates1d(ncol*pver,max(1,gas_pcnst)) ! washout rates (1/s)
+    real(r8) :: base_sol1d(ncol*pver,gas_pcnst) ! species mixing ratios (vmr)
     !-----------------------------------------------------------------------
     ! ... local variables
     !-----------------------------------------------------------------------
@@ -162,6 +165,7 @@ contains
     real(r8) :: dti(veclen)
     real(r8) :: max_delta(max(1,clscnt4))
     real(r8) :: ind_prd(ncol,pver,max(1,clscnt4))
+    real(r8) :: ind_prd1d(ncol*pver,max(1,clscnt4))
     logical :: convergence
     integer :: chnkpnts ! total spatial points in chunk; ncol*ncol
     logical :: diags_out(ncol,pver,max(1,clscnt4))
@@ -182,6 +186,7 @@ contains
     real(r8) :: extfrc_blk(veclen,max(1,extcnt))
     real(r8) :: het_rates_blk(veclen,max(1,gas_pcnst))
     real(r8) :: base_sol_blk(veclen,gas_pcnst)
+    integer :: offset,k
     chnkpnts = ncol*pver
     prod_out = 0._r8
     loss_out = 0._r8
@@ -191,22 +196,34 @@ contains
     !-----------------------------------------------------------------------
     if( cls_rxt_cnt(1,4) > 0 .or. extcnt > 0 ) then
        call indprd( 4, ind_prd, clscnt4, base_sol, extfrc, &
-            reaction_rates, chnkpnts )
+            reaction_rates, ncol )
     else
        do m = 1,clscnt4
-          ind_prd(:,m) = 0._r8
+          ind_prd(:,:,m) = 0._r8
        end do
     end if
+
+    ! Dimension convert
+     do k = 1,pver
+       offset = (k-1)*ncol
+       reaction_rates1d(offset+1:offset+ncol,:) = reaction_rates(:ncol,k,:)
+       extfrc1d(offset+1:offset+ncol,:) = extfrc(:ncol,k,:)
+       het_rates1d(offset+1:offset+ncol,:) = het_rates(:ncol,k,:)
+       ind_prd1d(offset+1:offset+ncol,:) = ind_prd(:ncol,k,:)
+       base_sol1d(offset+1:offset+ncol,:) = base_sol(:ncol,k,:)
+     end do
+
+
     nstep = get_nstep()
     ofl = 1
     chnkpnts_loop : do
        ofu = min( chnkpnts,ofl + veclen - 1 )
        avec_len = (ofu - ofl) + 1
-       reaction_rates_blk(1:avec_len,:) = reaction_rates(ofl:ofu,:)
-       extfrc_blk(1:avec_len,:) = extfrc(ofl:ofu,:)
-       het_rates_blk(1:avec_len,:) = het_rates(ofl:ofu,:)
-       ind_prd_blk(1:avec_len,:) = ind_prd(ofl:ofu,:)
-       base_sol_blk(1:avec_len,:) = base_sol(ofl:ofu,:)
+       reaction_rates_blk(1:avec_len,:) = reaction_rates1d(ofl:ofu,:)
+       extfrc_blk(1:avec_len,:) = extfrc1d(ofl:ofu,:)
+       het_rates_blk(1:avec_len,:) = het_rates1d(ofl:ofu,:)
+       ind_prd_blk(1:avec_len,:) = ind_prd1d(ofl:ofu,:)
+       base_sol_blk(1:avec_len,:) = base_sol1d(ofl:ofu,:)
        cls_conv_blk(1:avec_len) = .false.
        dt(1:avec_len) = delt
        cut_cnt(1:avec_len) = 0
@@ -279,10 +296,10 @@ contains
              !-----------------------------------------------------------------------
              ! ... form f(y)
              !-----------------------------------------------------------------------
-             call t_startf( 'prod_loss' )
-             call imp_prod_loss( avec_len, prod_blk, loss_blk, &
+             call t_startf( 'prod_loss_blk' )
+             call imp_prod_loss_blk( avec_len, prod_blk, loss_blk, &
                   base_sol_blk, reaction_rates_blk, het_rates_blk )
-             call t_stopf( 'prod_loss' )
+             call t_stopf( 'prod_loss_blk' )
              do m = 1,clscnt4
                 do i = 1, avec_len
                    forcing_blk(i,m) = solution_blk(i,m)*dti(i) &
@@ -331,12 +348,12 @@ contains
                        spc_conv_blk(i,cndx) = .true.
                      endif
                    enddo
-                   where( spc_conv_blk(1:avec_len,cndx) .and. .not.diags_out(ofl:ofu,cndx) )
-                      ! capture output production and loss diagnostics at converged ponits
-                      prod_out(ofl:ofu,cndx) = prod_blk(1:avec_len,cndx) + ind_prd_blk(1:avec_len,cndx)
-                      loss_out(ofl:ofu,cndx) = loss_blk(1:avec_len,cndx)
-                      diags_out(ofl:ofu,cndx) = .true.
-                   endwhere
+!                  where( spc_conv_blk(1:avec_len,cndx) .and. .not.diags_out(ofl:ofu,cndx) )
+!                     ! capture output production and loss diagnostics at converged ponits
+!                     prod_out(ofl:ofu,cndx) = prod_blk(1:avec_len,cndx) + ind_prd_blk(1:avec_len,cndx)
+!                     loss_out(ofl:ofu,cndx) = loss_blk(1:avec_len,cndx)
+!                     diags_out(ofl:ofu,cndx) = .true.
+!                  endwhere
                 end do
                 do i = 1, avec_len
                   if( .not. cls_conv_blk(i) ) then
@@ -410,7 +427,7 @@ contains
                  end if
                  dt(i) = min( dt(i),delt-interval_done(i) )
                else
-                 base_sol(ofl+i-1,1:gas_pcnst) = base_sol_blk(i,1:gas_pcnst)
+                 base_sol1d(ofl+i-1,1:gas_pcnst) = base_sol_blk(i,1:gas_pcnst)
                endif
             endif
           end do
@@ -435,5 +452,12 @@ contains
           exit chnkpnts_loop
        end if
     end do chnkpnts_loop
+
+    ! Dimension convert
+     do k = 1,pver
+       offset = (k-1)*ncol
+       base_sol(:ncol,k,:) = base_sol1d(offset+1:offset+ncol,:)
+     end do
+
   end subroutine imp_sol
 end module mo_imp_sol
