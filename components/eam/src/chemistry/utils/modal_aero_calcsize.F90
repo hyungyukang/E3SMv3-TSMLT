@@ -1613,7 +1613,7 @@ end subroutine modal_aero_calcsize_sub
 
 !----------------------------------------------------------------------
 
-#ifdef WACCM_TSMLT
+#ifdef TSMLT
 subroutine modal_aero_calcsize_diag(state, pbuf, list_idx_in, dgnum_m, &
                                     hygro_m, dryvol_m, dryrad_m, drymass_m, so4dryvol_m, naer_m)
 #else

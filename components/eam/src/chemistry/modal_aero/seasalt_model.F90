@@ -20,7 +20,7 @@ module seasalt_model
   public :: seasalt_emis
   public :: seasalt_active
 
-#ifdef WACCM_TSMLT
+#ifdef TSMLT
   public :: n_ocean_data
   public :: nslt_om
   public :: F_eff_out                 ! Output effective enrichment ratio?
@@ -43,13 +43,13 @@ module seasalt_model
   real(r8):: emis_scale
 
 ! TODO SMB: Implement better mechanism for setting this switch.
-#if (defined MODAL_AERO_9MODE || defined MODAL_AERO_4MODE_MOM || defined WACCM_TSMLT)
+#if (defined MODAL_AERO_9MODE || defined MODAL_AERO_4MODE_MOM || defined TSMLT)
    logical :: has_mam_mom = .true.
 #else
    logical :: has_mam_mom = .false.
 #endif
 
-#ifdef WACCM_TSMLT
+#ifdef TSMLT
   integer, parameter :: & ! number of ocean data fields
        n_ocean_data = 4
   logical, parameter   :: F_eff_out = .false.
@@ -83,7 +83,7 @@ module seasalt_model
 !      (/ 'ncl_a1', 'ncl_a2', 'ncl_a3', &
 !         'num_a1', 'num_a2', 'num_a3'/)
   integer, parameter :: om_num_ind = 0
-#elif( defined MODAL_AERO_4MODE_MOM || defined WACCM_TSMLT )
+#elif( defined MODAL_AERO_4MODE_MOM || defined TSMLT )
   integer, parameter :: nslt_om = 3
   integer, parameter :: nnum_om = 1
   integer, parameter :: om_num_modes = 3
@@ -206,7 +206,7 @@ contains
 
   end subroutine seasalt_emis
 
-#ifdef WACCM_TSMLT
+#ifdef TSMLT
 !-------------------------------------------------------------------
 !! READ INPUT FILES, CREATE FIELDS, and horizontally interpolate ocean data
 !-------------------------------------------------------------------
@@ -313,7 +313,7 @@ subroutine init_ocean_data()
        om_mode_loop: do m_om=1,nslt_om
 #if ( defined MODAL_AERO_9MODE )
           m = nslt+(n-1)*om_num_modes+m_om
-#elif ( defined MODAL_AERO_4MODE_MOM || defined WACCM_TSMLT)
+#elif ( defined MODAL_AERO_4MODE_MOM || defined TSMLT)
           m = nslt+m_om
 #endif
           call addfld('cflx_'//trim(seasalt_names(m))//'_debug', horiz_only, 'A', ' ', 'accumulation organic mass emissions' )

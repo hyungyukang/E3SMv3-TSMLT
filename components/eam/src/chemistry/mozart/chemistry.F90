@@ -937,7 +937,7 @@ end function chem_is_active
 
 !================================================================================
 
-#ifdef WACCM_TSMLT
+#ifdef TSMLT
   subroutine chem_init_cnst( name, q, gcid)
 #else
   subroutine chem_init_cnst( name, latvals, lonvals, mask, q)
@@ -960,7 +960,7 @@ end function chem_is_active
 ! Dummy arguments
 !-----------------------------------------------------------------------
     character(len=*), intent(in)  :: name       !  constituent name
-#ifdef WACCM_TSMLT
+#ifdef TSMLT
     integer,          intent(in)  :: gcid(:)
 #else
     real(r8),         intent(in)  :: latvals(:) ! lat in degrees (ncol)
@@ -992,7 +992,7 @@ end function chem_is_active
 ! Get initial mixing ratios
 !-----------------------------------------------------------------------
 
-#ifdef WACCM_TSMLT
+#ifdef TSMLT
     if ( any( inv_lst .eq. name ) ) then
        q(:,:) = 0.0_r8
     else

@@ -16,7 +16,7 @@ module mo_drydep
   use cam_pio_utils,    only : cam_pio_openfile, cam_pio_closefile
   use cam_logfile,      only : iulog
   use dyn_grid,         only : get_dyn_grid_parm, get_horiz_grid_d
-  use scamMod,          only : single_column
+  use iop_data_mod,     only : single_column
 
 ! use shr_drydep_mod,   only : nddvels =>  n_drydep, drydep_list, mapping
 ! HGKANG ---
@@ -1088,7 +1088,7 @@ contains
                          wetland, vegetation_map )
 
     use mo_constants, only : r2d
-    use scamMod, only : latiop,loniop,scmlat,scmlon,scm_cambfb_mode
+    use iop_data_mod, only : latiop,loniop,scmlat,scmlon
     use shr_scam_mod  , only: shr_scam_getCloseLatLon  ! Standardized system subroutines
     use cam_initfiles, only: initial_file_get_id
     use dycore, only : dycore_is
@@ -1146,17 +1146,10 @@ contains
     call get_horiz_grid_d(plon, clon_d_out=lam)
 
     if (single_column) then
-       if (scm_cambfb_mode) then
-          piofile => initial_file_get_id()
-          call shr_scam_getCloseLatLon(piofile,scmlat,scmlon,closelat,closelon,latidx,lonidx)
-          ploniop=size(loniop)
-          platiop=size(latiop)
-       else
-          latidx=1
-          lonidx=1
-          ploniop=1
-          platiop=1
-       end if
+       latidx=1
+       lonidx=1
+       ploniop=1
+       platiop=1
 
        lon_edge(1) = loniop(lonidx) * r2d - .5_r8*(loniop(2) - loniop(1)) * r2d
 

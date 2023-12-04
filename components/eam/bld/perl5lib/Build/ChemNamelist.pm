@@ -16,9 +16,28 @@ use lib "$Bin/perl5lib";
 use Build::ChemPreprocess qw(get_species_list);
 
 our @ISA = qw(Exporter);
-our @EXPORT = qw(set_dep_lists);
+our @EXPORT = qw(set_dep_lists set_aero_modes_info chem_has_species);
 our $VERSION = 1.00;
 
+#-------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+sub chem_has_species
+{
+    my ( $cfg, $species ) = @_;
+    my $chem_proc_src = $cfg->get('chem_proc_src');
+    my $chem_src_dir = $cfg->get('chem_src_dir');
+    my @species_list;
+    if ($chem_proc_src) {
+        @species_list = get_species_list($chem_proc_src);
+    } else {
+        @species_list = get_species_list($chem_src_dir);
+    }
+    my %hash;
+    @hash{@species_list}=();
+
+    return ( exists $hash{$species} );
+
+}
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 sub set_dep_lists
@@ -56,6 +75,86 @@ sub set_dep_lists
     return (  $gas_wetdep_list, $aer_wetdep_list, $aer_drydep_list, $gas_drydep_list );
 }
 
+#-------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+sub set_aero_modes_info
+{
+    my ( $cfg, $data_src, $print_lvl, $mode_types, $modal_species, $modal_groups,
+         $mode_spec_type, $mode_spec, $mode_spec_cw, $mode_spec_src ) = @_;
+
+    my $chem_proc_src = $cfg->get('chem_proc_src');
+    my $chem_src_dir = $cfg->get('chem_src_dir');
+    my @species_list;
+    if ($chem_proc_src) {
+        @species_list = get_species_list($chem_proc_src);
+    } else {
+        @species_list = get_species_list($chem_src_dir);
+    }
+
+    my %mymodal_species = %$modal_species;
+    my $nmodes = scalar(@$mode_types);
+    my $found_modal_species = 0;
+
+    for (my $i = 1; $i <= $nmodes; $i++) {
+        my @type ;
+        my @spec ;
+        my @spec_cw ;
+        my @src ;
+        my $modal_species = 0;
+        my @species = @{ $$modal_groups{ @$mode_types[$i-1] } } ;
+        foreach my $spc (@species) {
+            if ($data_src eq 'A') {
+              foreach my $tracer (@species_list) {
+                if ($tracer =~ /^${spc}.*_a${i}$/) {
+                    $found_modal_species = 1;
+                    push @spec, $tracer ;
+                    push @src , $data_src ;
+                    my $tracer_cw = $tracer; $tracer_cw =~ s/_a/_c/g;
+                    push @spec_cw,  $tracer_cw;
+                    push @type, $mymodal_species{$spc};
+                }
+              }
+            } else { # for prescribed modal aerosols do not check against the species list ....
+                my $tracer = ${spc}.'_a'.${i};
+                $found_modal_species = 1;
+                push @spec, $tracer ;
+                push @src , $data_src ;
+                my $tracer_cw = $tracer; $tracer_cw =~ s/_a/_c/g;
+                push @spec_cw,  $tracer_cw;
+                push @type, $mymodal_species{$spc};
+            }
+        }
+        if ($found_modal_species) {
+            push @$mode_spec, [ @spec ];
+            push @$mode_spec_cw, [ @spec_cw ];
+            push @$mode_spec_type, [ @type ];
+            push @$mode_spec_src, [ @src ];
+        }
+    }
+
+    if ($print_lvl>=2) { print_modal_info( "mode_spec", @$mode_spec ); }
+    if ($print_lvl>=2) { print_modal_info( "mode_spec_cw", @$mode_spec_cw ); }
+    if ($print_lvl>=2) { print_modal_info( "mode_spec_type", @$mode_spec_type ); }
+    if ($print_lvl>=2) { print_modal_info( "mode_spec_src", @$mode_spec_src ); }
+
+    return ;
+}
+#-------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
+sub print_modal_info
+{
+    my ( $string,  @array ) = @_;
+    print "-------------------------------------------------------------------\n";
+    print "$string :\n";
+    foreach my $row (@array) {
+        print "   ";
+        foreach my $item (@$row) {
+            print $item, " ";
+        }
+        print "\n";
+    }
+    print "-------------------------------------------------------------------\n";
+}
 #-------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------
 sub get_gas_drydep_list

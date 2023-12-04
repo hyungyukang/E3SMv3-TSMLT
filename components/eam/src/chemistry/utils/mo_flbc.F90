@@ -702,7 +702,7 @@ contains
 
   subroutine get_dels( dels, last, next )
 
-#ifndef WACCM_TSMLT
+#ifndef TSMLT
     use intp_util, only: findplb
 #endif
 
