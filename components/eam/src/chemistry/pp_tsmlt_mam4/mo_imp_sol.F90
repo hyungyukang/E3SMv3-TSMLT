@@ -107,7 +107,8 @@ contains
     end do
   end subroutine imp_slv_inti
   subroutine imp_sol( base_sol, reaction_rates, het_rates, extfrc, delt, &
-                      ncol, nlev, lchnk, prod_out, loss_out )
+                      xhnm, ncol, lchnk, ltrop)
+!                     ncol, lchnk, prod_out, loss_out )
     !-----------------------------------------------------------------------
     ! ... imp_sol advances the volumetric mixing ratio
     ! forward one time step via the fully implicit euler scheme.
@@ -116,6 +117,7 @@ contains
     !-----------------------------------------------------------------------
     use chem_mods, only : rxntot, extcnt, nzcnt, permute, cls_rxt_cnt
     use mo_tracname, only : solsym
+    use ppgrid, only : pver
     use mo_lin_matrix, only : linmat
     use mo_nln_matrix, only : nlnmat
     use mo_lu_factor, only : lu_fac
@@ -129,15 +131,17 @@ contains
     ! ... dummy args
     !-----------------------------------------------------------------------
     integer, intent(in) :: ncol ! columns in chunck
-    integer, intent(in) :: nlev
+    integer, intent(in) :: pver
     integer, intent(in) :: lchnk ! chunk id
     real(r8), intent(in) :: delt ! time step (s)
-    real(r8), intent(in) :: reaction_rates(ncol*nlev,max(1,rxntot)) ! rxt rates (1/cm^3/s)
-    real(r8), intent(in) :: extfrc(ncol*nlev,max(1,extcnt)) ! external in-situ forcing (1/cm^3/s)
-    real(r8), intent(in) :: het_rates(ncol*nlev,max(1,gas_pcnst)) ! washout rates (1/s)
-    real(r8), intent(inout) :: base_sol(ncol*nlev,gas_pcnst) ! species mixing ratios (vmr)
-    real(r8), intent(out) :: prod_out(ncol*nlev,max(1,clscnt4))
-    real(r8), intent(out) :: loss_out(ncol*nlev,max(1,clscnt4))
+    real(r8), intent(in) :: reaction_rates(ncol,pver,max(1,rxntot)) ! rxt rates (1/cm^3/s)
+    real(r8), intent(in) :: extfrc(ncol,pver,max(1,extcnt)) ! external in-situ forcing (1/cm^3/s)
+    real(r8), intent(in) :: het_rates(ncol,pver,max(1,gas_pcnst)) ! washout rates (1/s)
+    real(r8), intent(inout) :: base_sol(ncol,pver,gas_pcnst) ! species mixing ratios (vmr)
+    real(r8), intent(in) :: xhnm(ncol,pver)
+    integer, intent(in) :: ltrop(ncol) ! chemistry troposphere boundary (index)
+!   real(r8), intent(out) :: prod_out(ncol*pver,max(1,clscnt4))
+!   real(r8), intent(out) :: loss_out(ncol*pver,max(1,clscnt4))
     !-----------------------------------------------------------------------
     ! ... local variables
     !-----------------------------------------------------------------------
@@ -157,10 +161,10 @@ contains
     real(r8) :: dt(veclen)
     real(r8) :: dti(veclen)
     real(r8) :: max_delta(max(1,clscnt4))
-    real(r8) :: ind_prd(ncol*nlev,max(1,clscnt4))
+    real(r8) :: ind_prd(ncol,pver,max(1,clscnt4))
     logical :: convergence
     integer :: chnkpnts ! total spatial points in chunk; ncol*ncol
-    logical :: diags_out(ncol*nlev,max(1,clscnt4))
+    logical :: diags_out(ncol,pver,max(1,clscnt4))
     real(r8) :: sys_jac_blk(veclen,max(1,nzcnt))
     real(r8) :: lin_jac_blk(veclen,max(1,nzcnt))
     real(r8) :: solution_blk(veclen,max(1,clscnt4))
@@ -178,7 +182,7 @@ contains
     real(r8) :: extfrc_blk(veclen,max(1,extcnt))
     real(r8) :: het_rates_blk(veclen,max(1,gas_pcnst))
     real(r8) :: base_sol_blk(veclen,gas_pcnst)
-    chnkpnts = ncol*nlev
+    chnkpnts = ncol*pver
     prod_out = 0._r8
     loss_out = 0._r8
     diags_out = .false.
