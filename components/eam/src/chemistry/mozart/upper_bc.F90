@@ -420,7 +420,7 @@ contains
 
 !===============================================================================
 
-#ifdef WACCM_TSMLT
+#ifdef TSMLT
   subroutine ubc_get_vals (lchnk, ncol, ntop_molec, pint, zi, ubc_temp, ubc_mmr, ubc_flux)
 #else
   subroutine ubc_get_vals (lchnk, ncol, pint, zi, ubc_temp, ubc_mmr)
@@ -439,7 +439,7 @@ contains
 !------------------------------Arguments--------------------------------
     integer,  intent(in)  :: lchnk                 ! chunk identifier
     integer,  intent(in)  :: ncol                  ! number of atmospheric columns
-#ifdef WACCM_TSMLT
+#ifdef TSMLT
     integer,  intent(in)  :: ntop_molec            ! top of molecular diffusion region (=1)
     real(r8), intent(out) :: ubc_flux(pcnst)       ! upper bndy flux (kg/s/m^2)
 #endif
@@ -461,7 +461,7 @@ contains
 
     ubc_mmr(:,:) = 0._r8
     ubc_temp(:) = nan
-#ifdef WACCM_TSMLT
+#ifdef TSMLT
     ubc_flux(:) = 0._r8
 #endif
 

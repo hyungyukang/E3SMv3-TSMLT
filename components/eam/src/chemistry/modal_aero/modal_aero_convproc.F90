@@ -2411,7 +2411,7 @@ end subroutine ma_convproc_tend
 !
 !-----------------------------------------------------------------------
 
-#ifdef WACCM_TSMLT
+#ifdef TSMLT
 !  use ndrop, only: activate_modal
    use ndrop, only: activate_aerosol
 #else

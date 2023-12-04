@@ -4684,6 +4684,34 @@ Default: FALSE
 
 <!-- Solar Parameters -->
 
+<entry id="solar_irrad_data_file" type="char*256" input_pathname="abs" category="solar"
+       group="solar_data_opts" valid_values="" >
+Full pathname of dataset for file that contains the solar photon energy spectra or TSI data
+as a time series
+Default: set by build-namelist
+</entry>
+
+<entry id="solar_euv_data_file" type="char*256" input_pathname="abs" category="solar"
+       group="solar_data_opts" valid_values="" >
+Full pathname of dataset for file that contains the solar EUV data
+as a time series
+Default: none
+</entry>
+
+<entry id="solar_parms_data_file" type="char*256" input_pathname="abs" category="waccm"
+       group="solar_data_opts" valid_values="" >
+Full pathname of time-variant dataset for the time-dependent proxies for
+solar and geomagnetic activity( F10.7, F10.7a, Kp, Ap ).
+Default: set by build-namelist.
+</entry>
+
+<entry id="solar_wind_data_file" type="char*256" input_pathname="abs" category="waccm"
+       group="solar_data_opts" valid_values="" >
+Full pathname of time-variant  dataset for the time-dependent solar wind parameters
+(solar wind velocity and density; IMF By and Bz components).
+Default: set by build-namelist.
+</entry>
+
 <entry id="solar_const" type="real" category="solar"
        group="solar_inparm" valid_values="">
 Total solar irradiance (W/m2).
@@ -4928,6 +4956,20 @@ In-cloud scav for cloud-borne aerosol tuning factor
 Default: set by build-namelist.
 </entry>
 
+<entry id="modal_accum_coarse_exch" type="logical" category="cam_chem"
+       group="aerosol_nl" valid_values="" >
+Turns on accumulation to coarse mode exchange appropriate for the stratosphere.
+This also changes the default mode definitions (widths and edges) via default
+aerosol property input files.
+Default: FALSE
+</entry>
+
+<entry id="modal_strat_sulfate" type="logical" category="cam_chem"
+       group="aerosol_nl" valid_values="" >
+Turns on prognostic modal sulfate aerosols in the stratosphere.
+Default: FALSE
+</entry>
+
 <entry id="modal_strat_sulfate_aod_treatment" type="logical"  category="cam_chem"
        group="phys_ctl_nl" valid_values="" >
 Flag for H2SO4 specific stratospheric wateruptake treatment
@@ -5026,6 +5068,13 @@ Default: set by build-namelist.
 Full pathname of dataset for the neutral species absorption cross sections for EUV
 photo reactions producing electrons.
 Default: set by build-namelist.
+</entry>
+
+<entry id="efield_potential_max" type="real" category="waccm_phys"
+       group="iondrag_nl" valid_values="" >
+Maximum cross cap electric potential used in Heelis high-latitude potential
+empirical model for WACCM ion drag and joule heating.
+Default: set by build-namelist (120 kV).
 </entry>
 
 <entry id="srf_emis_type" type="char*32" category="cam_chem"
@@ -5768,25 +5817,83 @@ Default: set by build-namelist.
 </entry>
 
 <entry id="sulf_file" type="char*256" input_pathname="abs" category="cam_chem"
-       group="chem_inparm" valid_values="" >
+       group="sulf_nl" valid_values="" >
 Full pathname of dataset containing tropopheric sulfate aerosols
 Default: set by build-namelist.
 </entry>
 
+<entry id="sulf_datapath" type="char*256" input_pathname="abs" category="cam_chem"
+       group="sulf_nl" valid_values="" >
+Full pathname of the directory that contains the files specified in
+{{ hilight }}sulf_filelist{{ closehilight }}.
+Default: set by build-namelist.
+</entry>
+
+<entry id="sulf_filelist" type="char*256" input_pathname="rel:sulf_datapath" category="cam_chem"
+       group="sulf_nl" valid_values="" >
+Filename of file that contains a sequence of filenames for prescribed
+sulfate.  The filenames in this file are relative to the directory specified
+by {{ hilight }}sulf_datapath{{ closehilight }}.
+Default: set by build-namelist.
+</entry>
+
+<entry id="sulf_name" type="char*16" category="cam_chem"
+       group="sulf_nl" valid_values="" >
+Name of variable containing sulfate data in the prescribed sulfate datasets.
+Default: 'SULFATE'
+</entry>
+
+<entry id="sulf_rmfile" type="logical" category="cam_chem"
+       group="sulf_nl" valid_values="" >
+Remove the file containing prescribed sulfate concentrations from local disk when no longer needed.
+Default: FALSE
+</entry>
+
+<entry id="sulf_type" type="char*32" category="cam_chem"
+       group="sulf_nl" valid_values="CYCLICAL,SERIAL,INTERP_MISSING_MONTHS,FIXED" >
+Type of time interpolation for data in prescribed sulfate files.
+Can be set to 'CYCLICAL', 'SERIAL', 'INTERP_MISSING_MONTHS', or 'FIXED'.
+Default: 'CYCLICAL'
+</entry>
+
+<entry id="sulf_cycle_yr" type="integer" category="cam_chem"
+       group="sulf_nl" valid_values="" >
+The  cycle year of the prescribed sulfate data
+if {{ hilight }}sulf_type{{ closehilight }}  is 'CYCLICAL'.
+Format: YYYY
+Default: 0
+</entry>
+
+<entry id="sulf_fixed_ymd" type="integer" category="cam_chem"
+       group="sulf_nl" valid_values="" >
+The date at which the prescribed sulfate data is fixed
+if {{ hilight }}sulf_type{{ closehilight }} is 'FIXED'.
+Format: YYYYMMDD
+Default: 0
+</entry>
+
+<entry id="sulf_fixed_tod" type="integer" category="cam_chem"
+       group="sulf_nl" valid_values="" >
+The time of day (seconds) corresponding to {{ hilight }}sulf_fixed_ymd{{ closehilight }}
+at which the prescribed sulfate data is fixed
+if {{ hilight }}sulf_type{{ closehilight }} is 'FIXED'.
+Default: 0 seconds
+</entry>
+
 <entry id="tgcm_ubc_file" type="char*256" input_pathname="abs" category="waccm"
-       group="chem_inparm" valid_values="" >
+       group="upper_bc_opts" valid_values="" >
 Full pathname of dataset for TGCM upper boundary
 Default: set by build-namelist.
 </entry>
 <entry id="tgcm_ubc_data_type" type="char*32" category="waccm"
-       group="chem_inparm" valid_values="CYCLICAL,SERIAL,INTERP_MISSING_MONTHS,FIXED" >
+       group="upper_bc_opts" valid_values="CYCLICAL,SERIAL,INTERP_MISSING_MONTHS,FIXED" >
 Type of time interpolation for data in TGCM upper boundary file.
 Can be set to 'CYCLICAL', 'SERIAL', 'INTERP_MISSING_MONTHS', or 'FIXED'.
 Default: 'SERIAL'
 </entry>
 
 <entry id="tgcm_ubc_cycle_yr" type="integer" category="waccm"
-       group="chem_inparm" valid_values="" >
+       group="upper_bc_opts" valid_values="" >
 The cycle year of the TGCM upper boundary data
 if <varname>tgcm_ubc_type</varname>  is 'CYCLICAL'.
 Format: YYYY
@@ -5794,7 +5901,7 @@ Default: 0
 </entry>
 
 <entry id="tgcm_ubc_fixed_ymd" type="integer" category="waccm"
-       group="chem_inparm" valid_values="" >
+       group="upper_bc_opts" valid_values="" >
 The date at which the TGCM upper boundary data is fixed
 if <varname>tgcm_ubc_type</varname> is 'FIXED'.
 Format: YYYY
@@ -5802,7 +5909,7 @@ Default: 0
 </entry>
 
 <entry id="tgcm_ubc_fixed_tod" type="integer" category="waccm"
-       group="chem_inparm" valid_values="" >
+       group="upper_bc_opts" valid_values="" >
 The time of day (seconds) corresponding to <varname>tgcm_ubc_fixed_ymd</varname>
 at which the TGCM upper boundary data is fixed
 if <varname>tgcm_ubc_type</varname> is 'FIXED'.
@@ -5810,9 +5917,73 @@ Default: 0 seconds
 </entry>
 
 <entry id="t_pert_ubc" type="real" category="waccm"
-       group="chem_inparm" valid_values="" >
+       group="upper_bc_opts" valid_values="" >
 Perturbation applied to the upper boundary temperature.
 Default: 0.0
+</entry>
+
+<entry id="ubc_specifier" type="char*64(pcnst)"  category="upper_boundary"
+       group="upper_bc_opts" valid_values="" >
+
+List of fields that have fixed upper boundary conditions (temperature and mass mixing ratios)
+and corresponding data sources. Each entry in this list is of the form:
+  FLD->source
+where source may be of the following:
+  MSIS - NRL neutral atmosphere empirical model (Mass Spectrometer Incoherent Scatter radar)
+  TGCM - Input file generated by Thermospheric General Circulation Model
+  SNOE - Input file generated from Student Nitric Oxide Explorer satellite observations
+  UBC_FILE - Generalized input file which spans the upper boundary altitude
+  value (mmr|vmr) - Set to a constant value (e.g., 1.2e-6 mmr)
+
+These fields can be set to constant values with units of "mmr" (mass mixing ratio)
+or "vmr" (volume mixing ratio).  The upper boundary values of source UBC_FILE are prescribed
+in the UBC_FILE_path file. Fields of source UBC_FILE may include a CAM constituent name
+and a file field name separated by ":".
+
+Note: Constituents not included in ubc_specifier default to zero flux through the upper boundary.
+
+Example:
+  ubc_specifier = 'Q:H2O->UBC_FILE', 'CH4->2.D-10vmr', 'F->1.0D-15mmr', 'HF->1.0D-15mmr',
+                  'T->MSIS', 'H->MSIS', 'N->MSIS','O->MSIS', 'O2->MSIS', 'H2->TGCM', 'NO->SNOE'
+
+Default: set by build-namelist
+</entry>
+
+<entry id="ubc_file_path" type="char*512" input_pathname="abs" category="upper_boundary"
+       group="upper_bc_file_opts" valid_values="" >
+Full path of the file containing prescribed upper boundary conditions.
+Default: NONE
+</entry>
+
+<entry id="ubc_file_input_type" type="char*32" category="upper_boundary"
+       group="upper_bc_file_opts" valid_values="CYCLICAL,SERIAL,INTERP_MISSING_MONTHS,FIXED" >
+Type of time interpolation for data in {{ hilight }}ubc_file_path file{{ closehilight }}.
+Can be set to 'CYCLICAL', 'SERIAL', 'INTERP_MISSING_MONTHS', or 'FIXED'.
+Default: NONE
+</entry>
+
+<entry id="ubc_file_cycle_yr" type="integer" category="upper_boundary"
+       group="upper_bc_file_opts" valid_values="" >
+The cycle year of the prescribed upper boundary data
+if {{ hilight }}ubc_file_input_type{{ closehilight }} is 'CYCLICAL'.
+Format: YYYY
+Default: 0
+</entry>
+
+<entry id="ubc_file_fixed_ymd" type="integer" category="upper_boundary"
+       group="upper_bc_file_opts" valid_values="" >
+The date at which the upper boundary data is fixed
+if {{ hilight }}ubc_file_input_type{{ closehilight }} is 'FIXED'.
+Format: YYYYMMDD
+Default: 0
+</entry>
+
+<entry id="ubc_file_fixed_tod" type="integer" category="upper_boundary"
+       group="upper_bc_file_opts" valid_values="" >
+The time of day (seconds) corresponding to {{ hilight }}ubc_file_fixed_ymd{{ closehilight }}
+at which the upper boundary data is fixed
+if {{ hilight }}ubc_file_input_type{{ closehilight }} is 'FIXED'.
+Default: 0 seconds
 </entry>
 
 <entry id="chem_freq" type="integer" category="cam_chem"
@@ -6123,6 +6294,13 @@ Full pathname of cross section dataset for short wavelengh photolysis
 Default: set by build-namelist.
 </entry>
 
+<entry id="photo_max_zen" type="real" category="cam_chem"
+       group="chem_inparm" valid_values="" >
+Maximum zenith angle (degrees) used for photolysis.
+Default: set by build-namelist.
+</entry>
+
+
 <!-- Namelist read by seq_drydep_mod and shared by CAM and CLM -->
 
 <entry id="drydep_list" type="char*16(1000)" category="dry_deposition"
@@ -6130,6 +6308,37 @@ Default: set by build-namelist.
 List of species that undergo dry deposition.
 Default: set by build-namelist.
 </entry>
+
+<entry id="dep_data_file" type="char*500" input_pathname="abs" category="dry_deposition"
+       group="drydep_inparm" valid_values="" >
+Full pathname of file containing gas phase deposition data including effective
+Henry's law coefficients.
+Default: set by build-namelist.
+</entry>
+
+<entry id="rxn_rate_sums" type="char*256(200)" category="cam_chem"
+       group="rxn_rate_diags_nl" valid_values="" >
+Give the user the ability to specify rate families (or groupings) diagnostics based
+on reaction tag names. These group names can be added to history fincl variables.
+A "+" character at the end of a string indicates that the summation will continue with the next string.
+Example:
+ rate_sums =
+   'OX_P = NO_HO2 + CH3O2_NO + 2*jo2_b ... ',
+   'OX_L = NO2_O_M + HO2_O3 + CLO_O ...',
+   'RO2_RO2_sum = CH3O2_CH3O2a + CH3O2_CH3O2b + C2H5O2_CH3O2 + C2H5O2_C2H5O2 + CH3CO3_CH3O2 +',
+               'CH3CO3_CH3CO3 + CH3H7O2_CH3O2 + RO2_CH3O2 + MACRO2_CH3O2 ...',
+ fincl1 = 'OX_P','OX_L', 'RO2_RO2_sum', ...
+Default: none
+</entry>
+
+<entry id="chem_use_chemtrop" type="logical" category="chemistry"
+       group="chem_inparm" valid_values="" >
+Indicates whether to use the unified chemistry tropopause method to set the
+tropopause used in gas phase and aerosol chemical processes.  This has a maximum altitude
+level corresponding to 300 hPa for latitudes poleward of 50 degrees.
+Default: set by build-namelist
+</entry>
+
 
 <entry id="drydep_method" type="char*16" category="dry_deposition"
        group="drydep_inparm" valid_values="xactive_atm,xactive_lnd,table" >
@@ -6267,6 +6476,12 @@ Default: Set by build-namelist.
        group="qbo_nl" valid_values="" >
 TRUE implies qbo package is active.
 Default: FALSE
+</entry>
+
+<entry id="igrf_geomag_coefs_file" type="char*256" input_pathname="abs" category="waccm"
+       group="geomag_nl" valid_values="" >
+International Geomagnetic Reference Field (IGRF) coefficients.
+Default: None.
 </entry>
 
 <entry id="spe_data_file" type="char*256" input_pathname="abs" category="waccm"

@@ -41,7 +41,7 @@ module tracer_data
   public :: read_trc_restart
   public :: init_trc_restart
   public :: incr_filename
-#ifdef WACCM_TSMLT
+#ifdef TSMLT
   public :: put_fld_data
 #endif
 
