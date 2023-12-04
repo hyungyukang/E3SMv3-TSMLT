@@ -1128,7 +1128,7 @@ if ($prescribed_aero_model eq 'modal' or $chem =~ /_mam/) {
 
 if ($aer_model eq 'mam' ) {
 
-  my $aero_modes = '3mode';
+  my $aero_modes = '4mode';
   if ($chem =~ /_mam4/) {$aero_modes = '4mode';}
   if ($chem =~ /_mam4_mom/) {$aero_modes = '4mode_mom';}
   if ($chem =~ /_mam4_resus_mom/) {$aero_modes = '4mode_mom';}
@@ -1224,76 +1224,148 @@ if ($aer_model eq 'mam' ) {
 		 );
 	}
     }
-  } elsif($aero_modes eq '4mode') {
+
+  } elsif($aero_modes eq '4mode' and $chem eq 'tsmlt_mam4' ) {
       # For 4 modes
 
     # MAM rad_climate settings.  The externally mixed quantities in the modal aerosol
     # model are the modes.
     push @aero_names, qw(mam4_mode1 mam4_mode2 mam4_mode3 mam4_mode4);
     push @aerosources, qw(M: M: M: M:);
-  
+
     # Each of the mode names put into the @aero_names array needs to be defined.
     @mode_names    = qw(mam4_mode1 mam4_mode2 mam4_mode3 mam4_mode4);
     @mode_types    = qw(accum aitken coarse primary_carbon);
     @mode_num      = qw(num_a1 num_a2 num_a3 num_a4);
     @mode_num_cw   = qw(num_c1 num_c2 num_c3 num_c4);
     if ($rain_evap_to_coarse_aero == 0) { #default
-	@mode_spec     = (
-	    [qw(so4_a1 pom_a1 soa_a1 bc_a1 dst_a1 ncl_a1)],
-	    [qw(so4_a2 soa_a2 ncl_a2)],
-	    [qw(dst_a3 ncl_a3 so4_a3)],
-	    [qw(pom_a4 bc_a4)],
-	    );
-	@mode_spec_type = (
-	    [qw(sulfate p-organic s-organic black-c dust seasalt)],
-	    [qw(sulfate s-organic seasalt)],
-	    [qw(dust seasalt sulfate)],
-	    [qw(p-organic black-c)],
-	    );
-	@mode_spec_cw  = (
-	    [qw(so4_c1 pom_c1 soa_c1 bc_c1 dst_c1 ncl_c1)],
-	    [qw(so4_c2 soa_c2 ncl_c2)],
-	    [qw(dst_c3 ncl_c3 so4_c3)],
-	    [qw(pom_c4 bc_c4)],
-	    );	
-      
-	@mode_num_src  = qw(A A A A);
-	@mode_spec_src = (
-	    [qw(A A A A A A)],
-	    [qw(A A A)],
-	    [qw(A A A)],
-	    [qw(A A)],
-	    );
+        @mode_spec     = (
+            [qw(so4_a1 pom_a1 soa1_a1 soa2_a1 soa3_a1 soa4_a1 soa5_a1 bc_a1 dst_a1 ncl_a1)],
+            [qw(so4_a2 soa1_a2 soa2_a2 soa3_a2 soa4_a2 soa5_a2 ncl_a2)],
+            [qw(dst_a3 ncl_a3 so4_a3)],
+            [qw(pom_a4 bc_a4)],
+            );
+        @mode_spec_type = (
+            [qw(sulfate p-organic s-organic s-organic s-organic s-organic s-organic black-c dust seasalt)],
+            [qw(sulfate s-organic s-organic s-organic s-organic s-organic seasalt)],
+            [qw(dust seasalt sulfate)],
+            [qw(p-organic black-c)],
+            );
+        @mode_spec_cw  = (
+            [qw(so4_c1 pom_c1  soa1_c1 soa2_c1 soa3_c1 soa4_c1 soa5_c1 bc_c1 dst_c1 ncl_c1)],
+            [qw(so4_c2 soa1_c2 soa2_c2 soa3_c2 soa4_c2 soa5_c2 ncl_c2)],
+            [qw(dst_c3 ncl_c3 so4_c3)],
+            [qw(pom_c4 bc_c4)],
+            );
+
+        @mode_num_src  = qw(A A A A);
+        @mode_spec_src = (
+            [qw(A A A A A A A A A A)],
+            [qw(A A A A A A A)],
+            [qw(A A A)],
+            [qw(A A)],
+            );
     }
     else{
-	@mode_spec     = (
-            [qw(so4_a1 pom_a1 soa_a1 bc_a1 dst_a1 ncl_a1)],
-            [qw(so4_a2 soa_a2 ncl_a2)],
+        @mode_spec     = (
+            [qw(so4_a1 pom_a1 soa1_a1 soa2_a1 soa3_a1 soa4_a1 soa5_a1 bc_a1 dst_a1 ncl_a1)],
+            [qw(so4_a2 soa1_a2 soa2_a2 soa3_a2 soa4_a2 soa5_a2 ncl_a2)],
             [qw(dst_a3 ncl_a3 so4_a3 bc_a3 pom_a3 soa_a3)],
             [qw(pom_a4 bc_a4)],
             );
         @mode_spec_type = (
-            [qw(sulfate p-organic s-organic black-c dust seasalt)],
-            [qw(sulfate s-organic seasalt)],
+            [qw(sulfate p-organic s-organic s-organic s-organic s-organic s-organic black-c dust seasalt)],
+            [qw(sulfate s-organic s-organic s-organic s-organic s-organic seasalt)],
             [qw(dust seasalt sulfate black-c p-organic s-organic)],
             [qw(p-organic black-c)],
             );
         @mode_spec_cw  = (
-            [qw(so4_c1 pom_c1 soa_c1 bc_c1 dst_c1 ncl_c1)],
-            [qw(so4_c2 soa_c2 ncl_c2)],
+            [qw(so4_c1 pom_c1  soa1_c1 soa2_c1 soa3_c1 soa4_c1 soa5_c1 bc_c1 dst_c1 ncl_c1)],
+            [qw(so4_c2 soa1_c2 soa2_c2 soa3_c2 soa4_c2 soa5_c2 ncl_c2)],
             [qw(dst_c3 ncl_c3 so4_c3 bc_c3 pom_c3 soa_c3)],
             [qw(pom_c4 bc_c4)],
             );
 
         @mode_num_src  = qw(A A A A);
         @mode_spec_src = (
-            [qw(A A A A A A)],
+            [qw(A A A A A A A A A A)],
+            [qw(A A A A A A A)],
             [qw(A A A)],
-            [qw(A A A A A A)],
             [qw(A A)],
             );
     }
-    } elsif($aero_modes eq '5mode') {
+
+# } elsif($aero_modes eq '4mode') {
+#     # For 4 modes
+
+#   # MAM rad_climate settings.  The externally mixed quantities in the modal aerosol
+#   # model are the modes.
+#   push @aero_names, qw(mam4_mode1 mam4_mode2 mam4_mode3 mam4_mode4);
+#   push @aerosources, qw(M: M: M: M:);
+
+#   # Each of the mode names put into the @aero_names array needs to be defined.
+#   @mode_names    = qw(mam4_mode1 mam4_mode2 mam4_mode3 mam4_mode4);
+#   @mode_types    = qw(accum aitken coarse primary_carbon);
+#   @mode_num      = qw(num_a1 num_a2 num_a3 num_a4);
+#   @mode_num_cw   = qw(num_c1 num_c2 num_c3 num_c4);
+#   if ($rain_evap_to_coarse_aero == 0) { #default
+#       @mode_spec     = (
+#           [qw(so4_a1 pom_a1 soa_a1 bc_a1 dst_a1 ncl_a1)],
+#           [qw(so4_a2 soa_a2 ncl_a2)],
+#           [qw(dst_a3 ncl_a3 so4_a3)],
+#           [qw(pom_a4 bc_a4)],
+#           );
+#       @mode_spec_type = (
+#           [qw(sulfate p-organic s-organic black-c dust seasalt)],
+#           [qw(sulfate s-organic seasalt)],
+#           [qw(dust seasalt sulfate)],
+#           [qw(p-organic black-c)],
+#           );
+#       @mode_spec_cw  = (
+#           [qw(so4_c1 pom_c1 soa_c1 bc_c1 dst_c1 ncl_c1)],
+#           [qw(so4_c2 soa_c2 ncl_c2)],
+#           [qw(dst_c3 ncl_c3 so4_c3)],
+#           [qw(pom_c4 bc_c4)],
+#           );
+
+#       @mode_num_src  = qw(A A A A);
+#       @mode_spec_src = (
+#           [qw(A A A A A A)],
+#           [qw(A A A)],
+#           [qw(A A A)],
+#           [qw(A A)],
+#           );
+#   }
+#   else{
+#       @mode_spec     = (
+#           [qw(so4_a1 pom_a1 soa_a1 bc_a1 dst_a1 ncl_a1)],
+#           [qw(so4_a2 soa_a2 ncl_a2)],
+#           [qw(dst_a3 ncl_a3 so4_a3 bc_a3 pom_a3 soa_a3)],
+#           [qw(pom_a4 bc_a4)],
+#           );
+#       @mode_spec_type = (
+#           [qw(sulfate p-organic s-organic black-c dust seasalt)],
+#           [qw(sulfate s-organic seasalt)],
+#           [qw(dust seasalt sulfate black-c p-organic s-organic)],
+#           [qw(p-organic black-c)],
+#           );
+#       @mode_spec_cw  = (
+#           [qw(so4_c1 pom_c1 soa_c1 bc_c1 dst_c1 ncl_c1)],
+#           [qw(so4_c2 soa_c2 ncl_c2)],
+#           [qw(dst_c3 ncl_c3 so4_c3 bc_c3 pom_c3 soa_c3)],
+#           [qw(pom_c4 bc_c4)],
+#           );
+
+#       @mode_num_src  = qw(A A A A);
+#       @mode_spec_src = (
+#           [qw(A A A A A A)],
+#           [qw(A A A)],
+#           [qw(A A A A A A)],
+#           [qw(A A)],
+#           );
+#   }
+
+  } elsif($aero_modes eq '5mode') {
      # For 5 sulfate modes
 
     # MAM rad_climate settings.  The externally mixed quantities in the modal aerosol
@@ -1562,7 +1634,7 @@ if ($aer_model eq 'mam' ) {
   # water refractive index properties needed for modal optics calculations
   add_default($nl, 'water_refindex_file');
 
-} elsif($aer_model eq 'bam') {
+  } elsif($aer_model eq 'bam') {
 
   # bulk aerosol contributions
 

@@ -244,6 +244,11 @@
 <mam_pom  rad="rrtmg" mam="3mode">atm/cam/physprops/ocpho_rrtmg_c101112.nc</mam_pom>
 <mam_pom  rad="rrtmg">atm/cam/physprops/ocpho_rrtmg_c130709.nc</mam_pom>
 <mam_soa  rad="rrtmg">atm/cam/physprops/ocphi_rrtmg_c100508.nc</mam_soa>
+<mam_soa1 rad="rrtmg">atm/cam/physprops/ocphi_rrtmg_c100508.nc</mam_soa1>
+<mam_soa2 rad="rrtmg">atm/cam/physprops/ocphi_rrtmg_c100508.nc</mam_soa2>
+<mam_soa3 rad="rrtmg">atm/cam/physprops/ocphi_rrtmg_c100508.nc</mam_soa3>
+<mam_soa4 rad="rrtmg">atm/cam/physprops/ocphi_rrtmg_c100508.nc</mam_soa4>
+<mam_soa5 rad="rrtmg">atm/cam/physprops/ocphi_rrtmg_c100508.nc</mam_soa5>
 <mam_bc   rad="rrtmg">atm/cam/physprops/bcpho_rrtmg_c100508.nc</mam_bc>
 <mam_dst  rad="rrtmg">atm/cam/physprops/dust_aeronet_rrtmg_c141106.nc</mam_dst>
 <mam_ncl  rad="rrtmg">atm/cam/physprops/ssam_rrtmg_c100508.nc</mam_ncl>
@@ -254,6 +259,11 @@
 <mam_pom  rad="rrtmgp" mam="3mode">atm/cam/physprops/ocpho_rrtmg_c101112.nc</mam_pom>
 <mam_pom  rad="rrtmgp">atm/cam/physprops/ocpho_rrtmg_c130709.nc</mam_pom>
 <mam_soa  rad="rrtmgp">atm/cam/physprops/ocphi_rrtmg_c100508.nc</mam_soa>
+<mam_soa1  rad="rrtmgp">atm/cam/physprops/ocphi_rrtmg_c100508.nc</mam_soa1>
+<mam_soa2  rad="rrtmgp">atm/cam/physprops/ocphi_rrtmg_c100508.nc</mam_soa2>
+<mam_soa3  rad="rrtmgp">atm/cam/physprops/ocphi_rrtmg_c100508.nc</mam_soa3>
+<mam_soa4  rad="rrtmgp">atm/cam/physprops/ocphi_rrtmg_c100508.nc</mam_soa4>
+<mam_soa5  rad="rrtmgp">atm/cam/physprops/ocphi_rrtmg_c100508.nc</mam_soa5>
 <mam_bc   rad="rrtmgp">atm/cam/physprops/bcpho_rrtmg_c100508.nc</mam_bc>
 <mam_dst  rad="rrtmgp">atm/cam/physprops/dust_aeronet_rrtmg_c141106.nc</mam_dst>
 <mam_ncl  rad="rrtmgp">atm/cam/physprops/ssam_rrtmg_c100508.nc</mam_ncl>

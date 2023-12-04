@@ -4,7 +4,7 @@
 
 <!DOCTYPE phys_defaults [
   <!ENTITY eam_phys_defaults "-nlev 82 -clubb_sgs -microphys p3">
-  <!ENTITY eam_chem_defaults "-chem tsmlt_mam4 -rain_evap_to_coarse_aero">
+  <!ENTITY eam_chem_defaults "-chem tsmlt_mam4">
 ]>
 
 <!--<!DOCTYPE phys_defaults [

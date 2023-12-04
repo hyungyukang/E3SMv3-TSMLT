@@ -1447,6 +1447,10 @@ if ($chem_pkg =~ '_mam3') {
     $chem_cppdefs = ' -DMODAL_AERO -DMODAL_AERO_9MODE ';
 }
 
+if ($chem_pkg eq 'tsmlt_mam4') {
+    $chem_cppdefs .= ' -DTSMLT';
+}
+
 if ($bc_dep_to_snow_updates == 1) {
     $chem_cppdefs = "$chem_cppdefs  -DMODAL_AER"
 }
