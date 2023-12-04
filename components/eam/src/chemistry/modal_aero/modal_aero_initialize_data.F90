@@ -124,16 +124,6 @@ contains
        xname_spectype(:nspec_amode(1),1)  = (/ 'sulfate   ', &
             'p-organic ', 's-organic ', 'black-c   ', &
             'dust      ', 'seasalt   ' /)
-#elif ( defined MODAL_AERO_4MODE || defined TSMLT )
-       xname_massptr(:nspec_amode(1),1)   = (/ 'so4_a1  ', &
-            'pom_a1  ', 'soa1_a1  ', 'soa1_a2  ', 'soa1_a3  ', 'soa1_a4  ', 'soa1_a5  ', 'bc_a1   ', &
-            'dst_a1  ', 'ncl_a1  ' /)
-       xname_massptrcw(:nspec_amode(1),1) = (/ 'so4_c1  ', &
-            'pom_c1  ', 'soa1_c1  ', 'soa1_c2  ', 'soa1_c3  ', 'soa1_c4  ', 'soa1_c5  ', 'bc_c1   ', &
-            'dst_c1  ', 'ncl_c1  ' /)
-       xname_spectype(:nspec_amode(1),1)  = (/ 'sulfate   ', &
-            'p-organic ', 's-organic ', 'black-c   ', &
-            'dust      ', 'seasalt   ' /)
 #endif
 
        ! mode 2 (aitken) species
