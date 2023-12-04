@@ -38,6 +38,10 @@
   </help>
 
 <!-- E3SM CMIP6 COMPSETS science compsets -->
+<compset>
+  <alias>WCYCL1850_TSMLT</alias>
+  <lname>1850SOI_EAM%CMIP6-TSMLT_ELM%SPBC_MPASSI_MPASO_MOSART_SGLC_SWAV</lname>
+</compset>
 
 <compset>
   <alias>WCYCL1850</alias>
