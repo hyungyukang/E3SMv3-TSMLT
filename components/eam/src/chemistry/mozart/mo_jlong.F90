@@ -5,14 +5,14 @@
 
       module mo_jlong
 
-      use shr_kind_mod, only : r4 => shr_kind_r4
-      use shr_kind_mod, only : r8 => shr_kind_r8
-      use cam_logfile,  only : iulog
+      use shr_kind_mod,     only : r4 => shr_kind_r4
+      use shr_kind_mod,     only : r8 => shr_kind_r8
+      use cam_logfile,      only : iulog
       use cam_abortutils,   only : endrun
 #ifdef SPMD
-      use mpishorthand, only : mpicom,mpiint,mpir8, mpilog, mpir4
+      use mpishorthand,     only : mpicom,mpiint,mpir8, mpilog, mpir4
 #endif
-      use spmd_utils,   only : masterproc
+      use spmd_utils,       only : masterproc
 
       implicit none
 
@@ -72,9 +72,8 @@
       subroutine jlong_init( xs_long_file, rsf_file, lng_indexer )
 
       use ppgrid,         only : pver
-      use time_manager,   only : is_end_curr_day
       use mo_util,        only : rebin
-      use solar_data,  only : data_nw => nbins, data_we => we, data_etf => sol_etf
+      use solar_irrad_data,only : data_nw => nbins, data_we => we, data_etf => sol_etf
 
       implicit none
 
@@ -471,8 +470,9 @@
       call mpibcast( alb,     numalb,   mpir8, 0, mpicom )
       call mpibcast( o3rat,   numcolo3, mpir8, 0, mpicom )
       call mpibcast( colo3,   nump,     mpir8, 0, mpicom )
-
-      call mpibcast( rsf_tab, nw*numalb*numcolo3*numsza*nump, mpir4, 0, mpicom )
+      do w = 1,nw
+         call mpibcast( rsf_tab(w,:,:,:,:), numalb*numcolo3*numsza*nump, mpir4, 0, mpicom )
+      enddo
 #endif
 #ifdef USE_BDE
       if (masterproc) write(iulog,*) 'Jlong using bdes'
@@ -498,10 +498,9 @@
 !	... set etfphot if required
 !---------------------------------------------------------------
 
-      use time_manager,   only : is_end_curr_day
       use mo_util,        only : rebin
 
-      use solar_data,  only : data_nw => nbins, data_we => we, data_etf => sol_etf
+      use solar_irrad_data,only : data_nw => nbins, data_we => we, data_etf => sol_etf
 
       implicit none
 

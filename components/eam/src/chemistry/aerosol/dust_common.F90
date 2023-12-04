@@ -3,9 +3,9 @@
 !=============================================================================
 module dust_common
 
-  use shr_kind_mod, only: r8 => shr_kind_r8, cl => shr_kind_cl
+  use shr_kind_mod,     only: r8 => shr_kind_r8, cl => shr_kind_cl
   use cam_abortutils,   only: endrun
-  use cam_logfile,  only: iulog
+  use cam_logfile,      only: iulog
 
   implicit none
   private

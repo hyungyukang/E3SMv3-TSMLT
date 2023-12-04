@@ -349,9 +349,9 @@ wave_loop : &
 !	... initialize subroutine r44
 !-----------------------------------------------------------------------------
 
-      use mo_params,   only : kw
+      use mo_params,       only : kw
       use cam_abortutils,  only : endrun
-      use cam_logfile, only : iulog
+      use cam_logfile,     only : iulog
 
       implicit none
 
@@ -470,9 +470,9 @@ wave_loop : &
 !	... initialize subroutine r08
 !-----------------------------------------------------------------------------
 
-      use mo_params,   only : kw
+      use mo_params,       only : kw
       use cam_abortutils,  only : endrun
-      use cam_logfile, only : iulog
+      use cam_logfile,     only : iulog
 
       implicit none
 

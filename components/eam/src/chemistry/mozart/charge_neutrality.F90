@@ -1,165 +1,250 @@
+module charge_neutrality
 
-      module charge_neutrality
+  use shr_kind_mod, only : r8 => shr_kind_r8
+  use ppgrid,       only : pcols, pver
+  use mo_chem_utls, only : get_spc_ndx
 
-      use shr_kind_mod,      only : r8 => shr_kind_r8
-      use cam_logfile,       only : iulog
+  implicit none
 
-      implicit none
+  private
+  public :: charge_balance
+  public :: charge_fix
 
-      private
-      public :: charge_balance
-      public :: charge_fix     ! temporary, for fixing charge balance after vertical diffusion
-                               ! without converting mass mixing ratios to volume
-                               ! mean mass assumed to be mwdry
+  interface charge_balance
+     module procedure charge_fix_vmr
+     module procedure charge_fix_mmr   ! for fixing charge balance after vertical diffusion
+  end interface
 
-      contains
+  integer, parameter :: pos_ion_n = 22
+  character(len=16), parameter :: pos_ion_names(pos_ion_n) = (/ &
+       'Np              ','N2p             ','Op              ','O2p             ','NOp             ', &
+       'O4p             ','O2p_H2O         ','Hp_H2O          ','Hp_2H2O         ','Hp_3H2O         ', &
+       'Hp_4H2O         ','Hp_5H2O         ','H3Op_OH         ','Hp_3N1          ','Hp_4N1          ', &
+       'NOp_H2O         ','NOp_2H2O        ','NOp_3H2O        ','NOp_CO2         ','NOp_N2          ', &
+       'Op2P            ','Op2D            ' /)
 
-      subroutine charge_balance( ncol, conc )
-!-----------------------------------------------------------------------      
-!        ... force ion/electron balance
-!-----------------------------------------------------------------------      
+  integer, parameter :: neg_ion_n = 21
+  character(len=16), parameter :: neg_ion_names(neg_ion_n) = (/ &
+       'Om              ','O2m             ','O3m             ','O4m             ','OHm             ', &
+       'CO3m            ','CO4m            ','NO2m            ','NO3m            ','HCO3m           ', &
+       'CLm             ','CLOm            ','CLm_H2O         ','CLm_HCL         ','CO3m_H2O        ', &
+       'NO3m_H2O        ','CO3m2H2O        ','NO2m_H2O        ','NO3m2H2O        ','NO3mHNO3        ', &
+       'NO3m_HCL        ' /)
 
-        use ppgrid,       only : pver
-        use mo_chem_utls, only : get_spc_ndx
-        use chem_mods,    only : gas_pcnst
+contains
 
-        implicit none
+  !-----------------------------------------------------------------------      
+  !        ... force ion/electron balance
+  !-----------------------------------------------------------------------      
+  subroutine charge_fix_vmr( ncol, vmr )
 
-!-----------------------------------------------------------------------      
-!        ... dummy arguments
-!-----------------------------------------------------------------------      
-      integer,  intent(in)          :: ncol
-      real(r8), intent(inout)       :: conc(ncol,pver,gas_pcnst)         ! concentration
+    !-----------------------------------------------------------------------      
+    !        ... dummy arguments
+    !-----------------------------------------------------------------------      
+    integer,  intent(in)    :: ncol
+    real(r8), intent(inout) :: vmr(:,:,:)         ! concentration
 
-!-----------------------------------------------------------------------      
-!        ... local variables
-!-----------------------------------------------------------------------      
-      integer  :: k, n
-      integer  :: elec_ndx
-      real(r8) :: wrk(ncol,pver)
+    !-----------------------------------------------------------------------      
+    !        ... local variables
+    !-----------------------------------------------------------------------      
+    integer  :: i, n
+    integer  :: elec_ndx
+    real(r8) :: wrk(ncol,pver)
 
-      elec_ndx = get_spc_ndx('e')
-#ifdef CB_DEBUG
-      write(iulog,*) ' '
-      write(iulog,*) '------------------------------------------------------------------'
-      write(iulog,*) 'charge_balance: e ndx,offset = ',elec_ndx,offset
-      write(iulog,*) 'charge_balance: size of conc = ',size(conc,dim=1),' x ',size(conc,dim=2),' x ',size(conc,dim=3)
-#endif
-      if( elec_ndx > 0 ) then
-	 wrk(:,:) = 0._r8
-         n = get_spc_ndx('Np')
-         if( n > 0 ) then
-	    do k = 1,pver
-	      wrk(:,k) = wrk(:,k) + conc(:ncol,k,n)
-	    end do
-         end if
-         n = get_spc_ndx('N2p')
-         if( n > 0 ) then
-	    do k = 1,pver
-	      wrk(:,k) = wrk(:,k) + conc(:ncol,k,n)
-	    end do
-         end if
-         n = get_spc_ndx('Op')
-         if( n > 0 ) then
-	    do k = 1,pver
-	      wrk(:,k) = wrk(:,k) + conc(:ncol,k,n)
-	    end do
-         end if
-         n = get_spc_ndx('O2p')
-         if( n > 0 ) then
-	    do k = 1,pver
-	      wrk(:,k) = wrk(:,k) + conc(:ncol,k,n)
-	    end do
-         end if
-         n = get_spc_ndx('NOp')
-         if( n > 0 ) then
-	    do k = 1,pver
-	      wrk(:,k) = wrk(:,k) + conc(:ncol,k,n)
-	    end do
-         end if
-#ifdef CB_DEBUG
-         write(iulog,*) 'charge_balance: electron concentration before balance'
-         write(iulog,'(1p,5g15.7)') conc(1,:,elec_ndx)
-         write(iulog,*) 'charge_balance: electron concentration after  balance'
-         write(iulog,'(1p,5g15.7)') wrk(1,:)
-         write(iulog,*) '------------------------------------------------------------------'
-         write(iulog,*) ' '
-#endif
-         conc(:ncol,:,elec_ndx) = wrk(:ncol,:)
-      end if
+    elec_ndx = get_spc_ndx('e')
 
-      end subroutine charge_balance
+    !--------------------------------------------------------------------
+    ! If electrons are in the chemistry add up charges to get electrons
+    !--------------------------------------------------------------------  
+    if( elec_ndx > 0 ) then
+       wrk(:,:) = 0._r8
 
+       do i = 1,pos_ion_n
+          n = get_spc_ndx(pos_ion_names(i))
+          if (n>0) then
+             wrk(:ncol,:) = wrk(:ncol,:) + vmr(:ncol,:,n)
+          endif
+       enddo
+       do i = 1,neg_ion_n
+          n = get_spc_ndx(neg_ion_names(i))
+          if (n>0) then 
+             wrk(:ncol,:) = wrk(:ncol,:) - vmr(:ncol,:,n)
+          endif
+       enddo
+
+       where ( wrk(:,:)<0._r8 )
+          wrk(:,:)=0._r8
+       end where
+
+       vmr(:ncol,:,elec_ndx) = wrk(:ncol,:)
+      
+    end if
+
+  end subroutine charge_fix_vmr
+
+  !-----------------------------------------------------------------------
+  !        ... force ion/electron balance
+  !-----------------------------------------------------------------------
+  subroutine charge_fix_mmr(state, pbuf)
+
+    use constituents,        only : cnst_get_ind
+    use air_composition,     only : mbarv                       ! Constituent dependent mbar
+    use short_lived_species, only : slvd_index,slvd_pbf_ndx => pbf_idx ! Routines to access short lived species in pbuf
+    use chem_mods,           only : adv_mass
+    use physics_buffer,      only : pbuf_get_field,physics_buffer_desc ! Needed to get variables from physics buffer
+    use physics_types,       only : physics_state
+
+    !-----------------------------------------------------------------------      
+    !        ... dummy arguments
+    !-----------------------------------------------------------------------      
+    type(physics_state), intent(inout), target :: state
+    type(physics_buffer_desc), pointer :: pbuf(:)    ! physics buffer
+
+    !-----------------------------------------------------------------------      
+    !        ... local variables
+    !-----------------------------------------------------------------------      
+    integer  :: i, n, ns, nc
+    integer  :: elec_ndx
+    integer  :: lchnk                 !Chunk number from state structure
+    integer  :: ncol                  !Number of columns in this chunk from state structure
+
+    real(r8), dimension(:,:,:), pointer :: q         ! model mass mixing ratios
+    real(r8), dimension(:,:),   pointer :: qs        ! Pointer to access fields in pbuf
+
+    character(len=16) :: name
+    real(r8) :: vmr(state%ncol,pver)  
+    real(r8) :: wrk(state%ncol,pver)
+
+    !-----------------------------------------------------------------------      
+    elec_ndx = get_spc_ndx('e')
+
+    !--------------------------------------------------------------------
+    ! If electrons are simulated enforce charge neutrality ...
+    !--------------------------------------------------------------------  
+    if( elec_ndx > 0 ) then
+       lchnk = state%lchnk
+       ncol  = state%ncol
+       q => state%q
+       wrk(:,:) = 0._r8
+
+       do i = 1,pos_ion_n+neg_ion_n
+          if (i .le. pos_ion_n) then
+             name = pos_ion_names(i)
+          else
+             name = neg_ion_names(i-pos_ion_n)
+          endif
+          n = get_spc_ndx(name) 
+
+          if (n>0) then
+!             call cnst_get_ind( name, nc, abort=.false. )
+             call cnst_get_ind( name, nc, abrtf=.false. )
+             if (nc>0) then
+                vmr(:ncol,:) = mbarv(:ncol,:,lchnk) * q(:ncol,:,nc) / adv_mass(n)
+             else
+                ! not transported
+                ns = slvd_index( name )
+                if (ns>0) then
+                   call pbuf_get_field(pbuf, slvd_pbf_ndx, qs, start=(/1,1,ns/), kount=(/pcols,pver,1/) )
+                   vmr(:ncol,:) = mbarv(:ncol,:,lchnk) * qs(:ncol,:) / adv_mass(n)
+                endif
+             endif
+             if (i .le. pos_ion_n) then
+                wrk(:ncol,:) = wrk(:ncol,:) + vmr(:ncol,:)
+             else
+                wrk(:ncol,:) = wrk(:ncol,:) - vmr(:ncol,:)
+             endif
+          end if
+       end do
+
+       where ( wrk(:,:)<0._r8 )
+          wrk(:,:)=0._r8
+       end where
+
+!      call cnst_get_ind( 'e', nc, abort=.false. )  
+       call cnst_get_ind( 'e', nc, abrtf=.false. )  
+
+       if (nc>0) then 
+          q(:ncol,:,nc) = adv_mass(elec_ndx) * wrk(:ncol,:) / mbarv(:ncol,:,lchnk)
+       else
+          ! not transported
+          ns = slvd_index( 'e' )
+          call pbuf_get_field(pbuf, slvd_pbf_ndx, qs, start=(/1,1,ns/), kount=(/pcols,pver,1/) )
+          qs(:ncol,:) = adv_mass(elec_ndx) * wrk(:ncol,:) / mbarv(:ncol,:,lchnk)
+       endif
+
+    endif
+
+  end subroutine charge_fix_mmr
 
       subroutine charge_fix( ncol, q )
-!-----------------------------------------------------------------------      
+!-----------------------------------------------------------------------
 !        ... force ion/electron balance
-!-----------------------------------------------------------------------      
+!-----------------------------------------------------------------------
 
       use ppgrid,       only : pver
       use constituents, only : cnst_get_ind, cnst_mw
       use physconst,    only : mwdry                   ! molecular weight of dry air
- 
+
       implicit none
 
-!-----------------------------------------------------------------------      
+!-----------------------------------------------------------------------
 !        ... dummy arguments
-!-----------------------------------------------------------------------      
+!-----------------------------------------------------------------------
       integer, intent(in)           :: ncol
       real(r8), intent(inout)       :: q(:,:,:)        ! model mass mixing ratios
 
-!-----------------------------------------------------------------------      
+!-----------------------------------------------------------------------
 !        ... local variables
-!-----------------------------------------------------------------------      
+!-----------------------------------------------------------------------
       integer  :: k, n
       integer  :: elec_ndx
       real(r8) :: wrk(ncol,pver)
       real(r8) :: mbar(ncol,pver)  ! mean mass (=mwdry) used to fake out optimizer to get
                                    ! identical answers to old code
 
-!-----------------------------------------------------------------------      
+!-----------------------------------------------------------------------
 
 ! assume that mbar = mwdry
       mbar(:,:) = mwdry
 
       call cnst_get_ind( 'e', elec_ndx, abrtf=.false. )
       if( elec_ndx > 0 ) then
-	 wrk(:,:) = 0._r8
+         wrk(:,:) = 0._r8
          call cnst_get_ind( 'Np', n, abrtf=.false. )
          if( n > 0 ) then
-	    do k = 1,pver
-	      wrk(:,k) = wrk(:,k) + mbar(:ncol,k) * q(:ncol,k,n) / cnst_mw(n)
-	    end do
+            do k = 1,pver
+              wrk(:,k) = wrk(:,k) + mbar(:ncol,k) * q(:ncol,k,n) / cnst_mw(n)
+            end do
          end if
          call cnst_get_ind( 'N2p', n, abrtf=.false. )
          if( n > 0 ) then
-	    do k = 1,pver
-	      wrk(:,k) = wrk(:,k) + mbar(:ncol,k) * q(:ncol,k,n) / cnst_mw(n)
-	    end do
+            do k = 1,pver
+              wrk(:,k) = wrk(:,k) + mbar(:ncol,k) * q(:ncol,k,n) / cnst_mw(n)
+            end do
          end if
          call cnst_get_ind( 'Op', n, abrtf=.false. )
          if( n > 0 ) then
-	    do k = 1,pver
+            do k = 1,pver
               wrk(:,k) = wrk(:,k) + mbar(:ncol,k) * q(:ncol,k,n) / cnst_mw(n)
-	    end do
+            end do
          end if
          call cnst_get_ind( 'O2p', n, abrtf=.false. )
          if( n > 0 ) then
-	    do k = 1,pver
+            do k = 1,pver
               wrk(:,k) = wrk(:,k) + mbar(:ncol,k) * q(:ncol,k,n) / cnst_mw(n)
-	    end do
+            end do
          end if
          call cnst_get_ind( 'NOp', n, abrtf=.false. )
          if( n > 0 ) then
-	    do k = 1,pver
+            do k = 1,pver
               wrk(:,k) = wrk(:,k) + mbar(:ncol,k) * q(:ncol,k,n) / cnst_mw(n)
-	    end do
+            end do
          end if
-	 do k = 1,pver
-	   q(:ncol,k,elec_ndx) = cnst_mw(elec_ndx) * wrk(:ncol,k) / mbar(:ncol,k)
-	 end do
+         do k = 1,pver
+           q(:ncol,k,elec_ndx) = cnst_mw(elec_ndx) * wrk(:ncol,k) / mbar(:ncol,k)
+         end do
       end if
 
       end subroutine charge_fix
 
-      end module charge_neutrality
+end module charge_neutrality

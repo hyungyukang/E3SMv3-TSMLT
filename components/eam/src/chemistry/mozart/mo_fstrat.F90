@@ -3,13 +3,13 @@ module mo_fstrat
   !	... variables for the upper boundary values
   !---------------------------------------------------------------
 
-  use shr_kind_mod, only : r8 => shr_kind_r8
-  use ppgrid,       only : pcols, pver,pverp, begchunk, endchunk
-  use chem_mods,    only : gas_pcnst
+  use shr_kind_mod,     only : r8 => shr_kind_r8
+  use ppgrid,           only : pcols, pver,pverp, begchunk, endchunk
+  use chem_mods,        only : gas_pcnst
   use cam_abortutils,   only : endrun
-  use cam_pio_utils, only : cam_pio_openfile
+  use cam_pio_utils,    only : cam_pio_openfile
   use pio
-  use cam_logfile,  only : iulog
+  use cam_logfile,      only : iulog
 
   implicit none
 
@@ -22,11 +22,9 @@ module mo_fstrat
   save
 
   real(r8), parameter :: taurelax = 864000._r8        ! 10 days
-  integer  :: gndx = 0
   integer  :: table_nox_ndx = -1
   integer  :: table_h2o_ndx = -1
   integer  :: table_ox_ndx  = -1
-  integer  :: table_synoz_ndx  = -1
   integer  :: no_ndx
   integer  :: no2_ndx
   integer  :: h2o_ndx
@@ -36,7 +34,6 @@ module mo_fstrat
   integer  :: o3a_ndx
   integer  :: xno_ndx
   integer  :: xno2_ndx
-  integer  :: synoz_ndx
   integer  :: o3rad_ndx
   real(r8) :: facrelax
   real(r8) :: days(12)
@@ -66,16 +63,11 @@ contains
     use time_manager,  only : get_calday
     use ioFileMod,     only : getfil
     use spmd_utils,    only : masterproc
-#ifdef SPMD
-    use mpishorthand,  only : mpicom,mpiint,mpir8
-#endif
-    use mo_tracname,  only : solsym
-    use chem_mods,    only : gas_pcnst
-    use mo_chem_utls, only : get_spc_ndx, get_inv_ndx
-    use constituents, only : pcnst
-    use dyn_grid,     only : get_dyn_grid_parm
+    use mo_tracname,   only : solsym
+    use chem_mods,     only : gas_pcnst
+    use mo_chem_utls,  only : get_spc_ndx, get_inv_ndx
+    use constituents,  only : pcnst
     use interpolate_data, only : interp_type, lininterp_init, lininterp
-    implicit none
 
     character(len=*), intent(in) :: fstrat_file
     character(len=*), intent(in) :: fstrat_list(:)
@@ -119,20 +111,12 @@ contains
     o3s_ndx     = get_spc_ndx( 'O3S' )
     o3inert_ndx = get_spc_ndx( 'O3INERT' )
     o3rad_ndx   = get_spc_ndx( 'O3RAD' )
-    synoz_ndx   = get_spc_ndx( 'SYNOZ' )
     o3a_ndx     = get_spc_ndx( 'O3A' )
     xno_ndx      = get_spc_ndx( 'XNO' )
     xno2_ndx      = get_spc_ndx( 'XNO2' )
 
-    if (.not.((o3rad_ndx > 0) .eqv. (synoz_ndx > 0))) then
-       call endrun('fstrat_inti: Both SYNOZ and O3RAD are required in chemical mechanism.')
-    endif
     if(masterproc) then
-       if (synoz_ndx > 0) then
-          if ( .not. any(fstrat_list == 'O3RAD') ) then
-             write(iulog,*) 'fstrat_inti: ***WARNING*** O3RAD is not include in fstrat_list namelist variable'
-          endif
-       else if (ox_ndx > 0) then
+       if (ox_ndx > 0) then
           if ( .not. any(fstrat_list == 'O3') ) then
              write(iulog,*) 'fstrat_inti: ***WARNING*** O3 is not include in fstrat_list namelist variable'
           endif
@@ -270,8 +254,6 @@ contains
           table_h2o_ndx = i
        else if( trim(ub_species_names(i)) == 'OX' ) then
           table_ox_ndx = i
-       else if( trim(ub_species_names(i)) == 'SYNOZ' ) then
-          table_synoz_ndx = i
        end if
        map(i) = 0
        do j = 1,gas_pcnst 
@@ -300,10 +282,10 @@ contains
                 end if
              end do
              if( map(i) == 0 ) then
-                if (masterproc) write(iulog,*) 'fstrat_inti: ubc table species ',trim(ub_species_names(i)), ' not used'
+                write(iulog,*) 'fstrat_inti: ubc table species ',trim(ub_species_names(i)), ' not used'
              end if
           else if( (trim(ub_species_names(i)) /= 'NOX') .and. (trim(ub_species_names(i)) /= 'H2O') ) then
-             if (masterproc) write(iulog,*) 'fstrat_inti: ubc table species ',trim(ub_species_names(i)), ' not used'
+             write(iulog,*) 'fstrat_inti: ubc table species ',trim(ub_species_names(i)), ' not used'
           end if
        end if
     end do table_loop
@@ -312,14 +294,14 @@ contains
        if ( any(fstrat_list(:) == 'NO') .or. any(fstrat_list(:) == 'NO2') ) then
           map(table_nox_ndx) = gas_pcnst + 1
        else
-          if (masterproc) write(iulog,*) 'fstrat_inti: ubc table species ',trim(ub_species_names(table_nox_ndx)), ' not used'
+          write(iulog,*) 'fstrat_inti: ubc table species ',trim(ub_species_names(table_nox_ndx)), ' not used'
        endif
     end if
     if( table_h2o_ndx > 0 ) then
        if ( h2o_ndx > 0 ) then
           map(table_h2o_ndx) = gas_pcnst + 2
        else
-          if (masterproc) write(iulog,*) 'fstrat_inti: ubc table species ',trim(ub_species_names(table_h2o_ndx)), ' not used'
+          write(iulog,*) 'fstrat_inti: ubc table species ',trim(ub_species_names(table_h2o_ndx)), ' not used'
        endif
     end if
 
@@ -365,20 +347,14 @@ contains
 
                    call lininterp(mr_ub_in(:,spcno, month, lev), ub_nlat, mr_ub(:,spcno,month,lev,c), &
                         ncols, lat_wgts)
-
-                   !                call regrid_1d( mr_ub_in(:,spcno,month,lev), mr_ub(:,spcno,month,lev), gndx, &
-                   !                     do_lat=.true.,to_lat_min=1, to_lat_max=plat )
 #ifdef DEBUG
                    if( lev == 25 .and. month == 1 .and. spcno == 1 ) then
                       write(iulog,*) 'mr_ub_in='
                       write(iulog,'(10f7.1)') mr_ub_in(:,spcno,month,lev)*1.e9_r8
                       write(iulog,*) 'mr_ub='
-                      write(iulog,'(10f7.1)') mr_ub(:,spcno,month,lev)*1.e9_r8
+                      write(iulog,'(10f7.1)') mr_ub(:,spcno,month,lev,c)*1.e9_r8
                    end if
 #endif
-                   !                mr_ub(1,spcno,month,lev) = mr_ub(2,spcno,month,lev)
-                   !                mr_ub(plat,spcno,month,lev) = mr_ub(plat-1,spcno,month,lev)
-
                 end if
 
              end do
@@ -424,10 +400,6 @@ contains
     !           ox, nox, hno3, ch4, co, n2o, n2o5 & stratospheric o3
     !--------------------------------------------------------------------
 
-    use mo_synoz, only : synoz_region => po3
-
-    implicit none
-
     !--------------------------------------------------------------------
     !	... dummy args
     !--------------------------------------------------------------------
@@ -443,10 +415,6 @@ contains
     !	... local variables
     !--------------------------------------------------------------------
     integer, parameter :: zlower = pver
-    real(r8), parameter    :: synoz_thres = 100.e-9_r8      ! synoz threshold
-    real(r8), parameter    :: o3rad_relax = 0.5_r8*86400._r8 ! 1/2 day relaxation constant
-    real(r8), parameter    :: synoz_relax = 2._r8*86400._r8 ! 2 day relaxation constant
-    real(r8), parameter    :: synoz_strat_relax = 5._r8*86400._r8 ! 5 day relaxation constant
 
     integer  ::  m, last, next, i, k, k1, km
     integer  ::  astat
@@ -455,15 +423,12 @@ contains
     integer  ::  kl(ncol,zlower)
     integer  ::  ku(ncol,zlower)
     real(r8) ::  vmrrelax
-    real(r8) ::  fac_relax
     real(r8) ::  pinterp
     real(r8) ::  nox_ubc, xno, xno2, rno
     real(r8) ::  dels
     real(r8) ::  delp(ncol,zlower)
     real(r8) ::  pint_vals(2)
     real(r8), allocatable :: table_ox(:)
-    logical  ::  found_trop
-    integer  :: lat
 
     if (.not. any(has_fstrat(:))) return
 
@@ -563,7 +528,7 @@ contains
                      + dels*(mr_ub(i,m,next,2:ub_nlevs-1,lchnk) &
                      - mr_ub(i,m,last,2:ub_nlevs-1,lchnk))
 #ifdef UB_DEBUG
-                write(iulog,*) 'set_fstrat_vals: table_ox @ lat = ',lat
+                write(iulog,*) 'set_fstrat_vals: table_ox @ i = ',i
                 write(iulog,'(1p5g15.7)') table_ox(:)
                 write(iulog,*) ' '
 #endif
@@ -579,7 +544,7 @@ contains
 #endif
                 call rebin( ub_nlevs-2, km, ub_plevse, pint(i,:km+1), table_ox, vmr(i,:km,map(m)) )
 #ifdef UB_DEBUG
-                write(iulog,*) 'set_fstrat_vals: ub o3 @ lat = ',lat
+                write(iulog,*) 'set_fstrat_vals: ub o3 @ i = ',i
                 write(iulog,'(1p5g15.7)') vmr(i,:km,map(m))
 #endif
              end do
@@ -596,7 +561,7 @@ contains
                      + delp(i,k) &
                      * (mr_ub(i,m,next,ku(i,k),lchnk) &
                      - mr_ub(i,m,next,kl(i,k),lchnk))
-                if( m /= table_nox_ndx .and. m /= table_h2o_ndx .and. m /= table_synoz_ndx ) then
+                if( m /= table_nox_ndx .and. m /= table_h2o_ndx ) then
                    vmr(i,k,map(m)) = pint_vals(1) &
                         + dels * (pint_vals(2) - pint_vals(1))
                 else if( m == table_nox_ndx .and. sim_has_nox ) then
@@ -638,9 +603,9 @@ contains
        end do
 #ifdef DEBUG
        if( levrelax /= ltrop(i) ) then
-          write(iulog,*) 'warning -- raised ubc: ',lat,i,
-          ltrop(i)-1,nint(pmid(i,ltrop(i)-1)/mb2pa),'mb -->',
-          levrelax,nint(pmid(i,levrelax)/mb2pa),'mb'
+          write(iulog,*) 'warning -- raised ubc: ',i,        &
+             ltrop(i)-1,nint(pmid(i,ltrop(i)-1)/100._r8),'mb -->', &
+             levrelax,nint(pmid(i,levrelax)/100._r8),'mb'
        end if
 #endif
        level_loop2 : do k = kmax(i)+1,levrelax
@@ -672,7 +637,7 @@ contains
                   - mr_ub(i,m,next,kl(i,k),lchnk))
              vmrrelax = pint_vals(1) &
                   + dels * (pint_vals(2) - pint_vals(1))
-             if( m /= table_nox_ndx .and. m /= table_h2o_ndx  .and. m /= table_synoz_ndx ) then
+             if( m /= table_nox_ndx .and. m /= table_h2o_ndx ) then
                 vmr(i,k,map(m)) = vmr(i,k,map(m)) &
                      + (vmrrelax - vmr(i,k,map(m))) * facrelax
              else if( m == table_nox_ndx .and. sim_has_nox) then
@@ -690,88 +655,18 @@ contains
           end if
        end do level_loop2
 
-       has_synoz : if( synoz_ndx > 0 ) then
-          if ( synoz_ndx > 0 .and. table_synoz_ndx > 0 ) then
-             fac_relax = 1._r8 - exp( -real(dtime) / synoz_strat_relax )
-             do k = 1,pver
-                m = table_synoz_ndx
-                if ( synoz_region(i,k,lchnk) > 0._r8 ) then
-                   pint_vals(1) = mr_ub(i,m,last,kl(i,k),lchnk) &
-                        + delp(i,k) &
-                        * (mr_ub(i,m,last,ku(i,k),lchnk) &
-                        - mr_ub(i,m,last,kl(i,k),lchnk))
-                   pint_vals(2) = mr_ub(i,m,next,kl(i,k),lchnk) &
-                        + delp(i,k) &
-                        * (mr_ub(i,m,next,ku(i,k),lchnk) &
-                        - mr_ub(i,m,next,kl(i,k),lchnk))
-                   vmrrelax = pint_vals(1) &
-                        + dels * (pint_vals(2) - pint_vals(1))
-                   vmr(i,k,map(m)) = vmr(i,k,map(m)) &
-                        + (vmrrelax - vmr(i,k,map(m))) * fac_relax
-                endif
-             enddo
-          endif
- 
-          !--------------------------------------------------------
-          ! 	... special assignments if synoz is present
-          !           update ox, o3s, o3inert in the stratosphere
-          !--------------------------------------------------------
-          if( ox_ndx > 0 ) then
-             do k = 1,levrelax
-                if( vmr(i,k,synoz_ndx) >= synoz_thres ) then
-                   vmr(i,k,ox_ndx) = vmr(i,k,synoz_ndx)
-                end if
-             end do
-          end if
+       !--------------------------------------------------------
+       !       ... set O3S and O3INERT to OX when no synoz
+       !--------------------------------------------------------
+       if( ox_ndx > 0 ) then
           if( o3s_ndx > 0 ) then
-             do k = 1,levrelax
-                if( vmr(i,k,synoz_ndx) >= synoz_thres ) then
-                   vmr(i,k,o3s_ndx) = vmr(i,k,synoz_ndx)
-                end if
-             end do
+             vmr(i,:ltrop(i),o3s_ndx)     = vmr(i,:ltrop(i),ox_ndx)
           end if
-          if( o3rad_ndx > 0 .and. o3inert_ndx > 0 ) then
-             vmr(i,:ltrop(i),o3inert_ndx) = vmr(i,:ltrop(i),o3rad_ndx)
+          if( o3inert_ndx > 0 ) then
+             vmr(i,:ltrop(i),o3inert_ndx) = vmr(i,:ltrop(i),ox_ndx)
           end if
-          !--------------------------------------------------------
-          ! 	... O3RAD is relaxed to climatology in the stratosphere
-          !           (done above) and OX in the troposphere
-          !--------------------------------------------------------
-          if( o3rad_ndx > 0 .and. ox_ndx > 0 ) then
-             fac_relax = 1._r8 - exp( -real(dtime) / o3rad_relax )
-             do k = levrelax+1,pver
-                vmr(i,k,o3rad_ndx) = vmr(i,k,o3rad_ndx) &
-                     + (vmr(i,k,ox_ndx) - vmr(i,k,o3rad_ndx)) * fac_relax
-             end do
-          end if
-          !--------------------------------------------------------
-          ! 	... relax synoz to 25 ppbv in lower troposphere
-          !           (p > 500 hPa) with an e-fold time of 2 days
-          !           (Mc Linden et al., JGR, p14,660, 2000)
-          !--------------------------------------------------------
-          fac_relax = 1._r8 - exp( -real(dtime) / synoz_relax )
-          vmrrelax = 25.e-9_r8
-          do k = levrelax+2,pver
-             if( pmid(i,k) >= 50000._r8 ) then
-                vmr(i,k,synoz_ndx) = vmr(i,k,synoz_ndx) &
-                     + (vmrrelax - vmr(i,k,synoz_ndx)) * fac_relax
-             end if
-          end do
-       else has_synoz
+       end if
 
-          !--------------------------------------------------------
-          !       ... set O3S and O3INERT to OX when no synoz
-          !--------------------------------------------------------
-          if( ox_ndx > 0 ) then
-             if( o3s_ndx > 0 ) then
-                vmr(i,:ltrop(i),o3s_ndx)     = vmr(i,:ltrop(i),ox_ndx)
-             end if
-             if( o3inert_ndx > 0 ) then
-                vmr(i,:ltrop(i),o3inert_ndx) = vmr(i,:ltrop(i),ox_ndx)
-             end if
-          end if
-
-       end if has_synoz
 
        if ( o3a_ndx > 0 ) then
           vmr(i,:ltrop(i),o3a_ndx) = (1._r8 - facrelax ) * vmr(i,:ltrop(i),o3a_ndx)
@@ -791,9 +686,6 @@ contains
     !--------------------------------------------------------------------
     !	... set the h2o upper boundary values
     !--------------------------------------------------------------------
-
-
-    implicit none
 
     !--------------------------------------------------------------------
     !	... dummy args
@@ -816,13 +708,10 @@ contains
     integer  ::  kl(ncol,zlower)
     integer  ::  ku(ncol,zlower)
     real(r8) ::  vmrrelax
-    real(r8) ::  fac_relax
     real(r8) ::  pinterp
     real(r8) ::  dels
     real(r8) ::  delp(ncol,zlower)
     real(r8) ::  pint_vals(2)
-    logical  ::  found_trop
-    integer  ::  lat
 
     h2o_overwrite : if( h2o_ndx > 0 .and. table_h2o_ndx > 0 ) then
        !--------------------------------------------------------
@@ -920,9 +809,9 @@ contains
           end do
 #ifdef DEBUG
           if( levrelax /= ltrop(i) ) then
-             write(iulog,*) 'warning -- raised ubc: ',lat,i,
-             ltrop(i)-1,nint(pmid(i,ltrop(i)-1)/100._r8),'mb -->',
-             levrelax,nint(pmid(i,levrelax)/100._r8),'mb'
+             write(iulog,*) 'warning -- raised ubc: ',i,          &
+                ltrop(i)-1,nint(pmid(i,ltrop(i)-1)/100._r8),'mb -->', &
+                levrelax,nint(pmid(i,levrelax)/100._r8),'mb'
           end if
 #endif
           do k = kmax(i)+1,levrelax
@@ -948,8 +837,6 @@ contains
     !	... rebin src to trg
     !---------------------------------------------------------------
 
-    implicit none
-
     !---------------------------------------------------------------
     !	... dummy arguments
     !---------------------------------------------------------------
@@ -963,7 +850,7 @@ contains
     !---------------------------------------------------------------
     !	... local variables
     !---------------------------------------------------------------
-    integer  :: i, l
+    integer  :: i
     integer  :: si, si1
     integer  :: sil, siu
     real(r8) :: y

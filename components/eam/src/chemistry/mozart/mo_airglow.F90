@@ -2,20 +2,22 @@
       module mo_airglow
 
       use shr_kind_mod,  only : r8 => shr_kind_r8
+      use physconst,     only : avogad
       use cam_abortutils,    only : endrun
 
       implicit none
 
       save
 
-      integer , parameter :: nag      = 2
+      integer , parameter :: nag      = 3
       real(r8), parameter :: secpday  = 86400._r8
       real(r8), parameter :: daypsec  = 1._r8/secpday
       real(r8), parameter :: hc       = 6.62608e-34_r8*2.9979e8_r8/1.e-9_r8
       real(r8), parameter :: wc_o2_1s = 1._r8/762._r8
       real(r8), parameter :: wc_o2_1d = 1._r8/1270._r8
+      real(r8), parameter :: wc_o1d   = 1._r8/630._r8
 
-      integer :: rid_ag1, rid_ag2
+      integer :: rid_ag1, rid_ag2, rid_ag3
       logical :: has_airglow
 
       private
@@ -34,18 +36,20 @@
 
           rid_ag1 = get_rxt_ndx( 'ag1' )
           rid_ag2 = get_rxt_ndx( 'ag2' )
+          rid_ag3 = get_rxt_ndx( 'ag3' )
 
-          has_airglow = rid_ag1 > 0 .and. rid_ag2 > 0 
+          has_airglow = rid_ag1 > 0 .and. rid_ag2 > 0 .and. rid_ag3 > 0
 
           if (.not. has_airglow) return
 
-          call addfld( 'AG1', (/ 'lev' /), 'I',   'K/s', 'O2_1S -> O2 + 762nm airglow loss' )
-          call addfld( 'AG2', (/ 'lev' /), 'I',   'K/s', 'O2_1D -> O2 + 1.27 micron airglow loss' )
-          call addfld( 'AGTOT', (/ 'lev' /), 'I', 'K/s', 'airglow total loss' )
+          call addfld( 'AIRGLW1',   (/ 'lev' /), 'I', 'K/s', 'O2_1D -> O2 + 1.27 micron airglow loss' )
+          call addfld( 'AIRGLW2',   (/ 'lev' /), 'I', 'K/s', 'O2_1S -> O2 + 762nm airglow loss' )
+          call addfld( 'AIRGLW3',   (/ 'lev' /), 'I', 'K/s', 'O1D -> O + 630 nm airglow loss' )
+          call addfld( 'AIRGLWTOT', (/ 'lev' /), 'I', 'K/s', 'airglow total loss' )
 
         endsubroutine init_airglow
 
-      subroutine airglow( ag_tot, o2_1s, o2_1d, rxt, cp, &
+      subroutine airglow( ag_tot, o2_1s, o2_1d, o1d, rxt, cp, &
                           ncol, lchnk )
 !-----------------------------------------------------------------------
 !      	... forms the airglow heating rates
@@ -55,7 +59,7 @@
       use ppgrid,        only : pver
       use cam_history,   only : outfld
       use mo_constants,  only : avo => avogadro
-
+      
       implicit none
 
 !-----------------------------------------------------------------------
@@ -66,6 +70,7 @@
       real(r8), intent(in)  ::  rxt(ncol,pver,rxntot)               ! rxt rates (1/cm^3/s)
       real(r8), intent(in)  ::  o2_1s(ncol,pver)                    ! concentration (mol/mol)
       real(r8), intent(in)  ::  o2_1d(ncol,pver)                    ! concentration (mol/mol)
+      real(r8), intent(in)  ::  o1d(ncol,pver)                      ! concentration (mol/mol)
       real(r8), intent(in)  ::  cp(ncol,pver)                       ! specific heat capacity
       real(r8), intent(out) ::  ag_tot(ncol,pver)                   ! airglow total heating rate (K/s)
 
@@ -82,15 +87,17 @@
          tmp(:)          = hc * avo / cp(:,k)
          ag_rate(:,k,1)  = tmp(:)*rxt(:,k,rid_ag1)*o2_1d(:,k)*wc_o2_1d
          ag_rate(:,k,2)  = tmp(:)*rxt(:,k,rid_ag2)*o2_1s(:,k)*wc_o2_1s
-         ag_tot(:,k)     = ag_rate(:,k,1) + ag_rate(:,k,2)
+         ag_rate(:,k,3)  = tmp(:)*rxt(:,k,rid_ag3)*o1d(:,k)*wc_o1d
+         ag_tot(:,k)     = ag_rate(:,k,1) + ag_rate(:,k,2) + ag_rate(:,k,3)
       end do
 
 !-----------------------------------------------------------------------
 !     	... output the rates
 !-----------------------------------------------------------------------
-      call outfld( 'AG1', ag_rate(:,:,1), ncol, lchnk )
-      call outfld( 'AG2', ag_rate(:,:,2), ncol, lchnk )
-      call outfld( 'AGTOT', ag_tot, ncol, lchnk )
+      call outfld( 'AIRGLW1', ag_rate(:,:,1), ncol, lchnk )
+      call outfld( 'AIRGLW2', ag_rate(:,:,2), ncol, lchnk )
+      call outfld( 'AIRGLW3', ag_rate(:,:,3), ncol, lchnk )
+      call outfld( 'AIRGLWTOT', ag_tot, ncol, lchnk )
 
       end subroutine airglow
 

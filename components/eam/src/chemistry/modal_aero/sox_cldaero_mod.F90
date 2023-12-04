@@ -4,15 +4,13 @@
 module sox_cldaero_mod
 
   use shr_kind_mod,    only : r8 => shr_kind_r8
-  use cam_abortutils,      only : endrun
+  use cam_abortutils,  only : endrun
   use ppgrid,          only : pcols, pver
   use mo_chem_utls,    only : get_spc_ndx
   use cldaero_mod,     only : cldaero_conc_t, cldaero_allocate, cldaero_deallocate
   use modal_aero_data, only : ntot_amode, modeptr_accum, lptr_so4_cw_amode, lptr_msa_cw_amode
   use modal_aero_data, only : numptrcw_amode, lptr_nh4_cw_amode
   use modal_aero_data, only : cnst_name_cw, specmw_so4_amode
-  use cam_history,     only : outfld
-  use cam_history,     only : addfld, horiz_only, add_default
   use chem_mods,       only : adv_mass
   use physconst,       only : gravit
   use phys_control,    only : phys_getopts
@@ -40,7 +38,6 @@ contains
 
     integer :: l, m
     logical :: history_aerosol      ! Output the MAM aerosol tendencies
-    logical :: history_verbose      ! produce verbose history output
 
     id_msa = get_spc_ndx( 'MSA' )
     id_h2so4 = get_spc_ndx( 'H2SO4' )
@@ -53,38 +50,10 @@ contains
                   //' -- should not invoke sox_cldaero_mod ')
     endif
 
-    call phys_getopts( history_aerosol_out        = history_aerosol, &
-                       history_verbose_out        = history_verbose  )
+    call phys_getopts( history_aerosol_out        = history_aerosol   )
     !
     !   add to history
     !
-    do m = 1, ntot_amode
-
-       l = lptr_so4_cw_amode(m)
-       if (l > 0) then
-          call addfld (&
-               trim(cnst_name_cw(l))//'AQSO4',horiz_only,  'A','kg/m2/s', &
-               trim(cnst_name_cw(l))//' aqueous phase chemistry')
-          call addfld (&
-               trim(cnst_name_cw(l))//'AQH2SO4',horiz_only,  'A','kg/m2/s', &
-               trim(cnst_name_cw(l))//' aqueous phase chemistry')
-          if ( history_aerosol .and. history_verbose ) then 
-             call add_default (trim(cnst_name_cw(l))//'AQSO4', 1, ' ')
-             call add_default (trim(cnst_name_cw(l))//'AQH2SO4', 1, ' ')
-          endif
-       end if
-
-    end do
-
-    call addfld ('AQSO4_H2O2',horiz_only,  'A','kg/m2/s', &
-         'SO4 aqueous phase chemistry due to H2O2')
-    call addfld ('AQSO4_O3',horiz_only,  'A','kg/m2/s', &
-         'SO4 aqueous phase chemistry due to O3')
-
-    if ( history_aerosol .and. history_verbose) then    
-       call add_default ('AQSO4_H2O2', 1, ' ')
-       call add_default ('AQSO4_O3', 1, ' ')    
-    endif
   
   end subroutine sox_cldaero_init
 
@@ -108,10 +77,8 @@ contains
     integer :: i,k
 
     logical :: mode7
-    logical :: mode9
 
     mode7 = ntot_amode == 7
-    mode9 = ntot_amode == 9
 
     conc_obj => cldaero_allocate()
 
@@ -128,8 +95,8 @@ contains
 
     conc_obj%no3c(:,:) = 0._r8
 
-    if (mode7 .or. mode9) then
-#if ( defined MODAL_AERO_7MODE || defined MODAL_AERO_9MODE )
+    if (mode7) then
+#if ( defined MODAL_AERO_7MODE )
 !put ifdef here so ifort will compile 
        id_so4_1a = lptr_so4_cw_amode(1) - loffset
        id_so4_2a = lptr_so4_cw_amode(2) - loffset
@@ -161,7 +128,6 @@ contains
             + qcw(:ncol,:,id_nh4_5a) &
             + qcw(:ncol,:,id_nh4_6a) 
     else
-       !note: here is 4 and 3 mode cases,the 4th-mode here has no so4     
        id_so4_1a = lptr_so4_cw_amode(1) - loffset
        id_so4_2a = lptr_so4_cw_amode(2) - loffset
        id_so4_3a = lptr_so4_cw_amode(3) - loffset
@@ -177,25 +143,7 @@ contains
 
        ! with 3-mode, assume so4 is nh4hso4, and so half-neutralized
        conc_obj%so4_fact = 1._r8
-#if (defined MODAL_AERO_5MODE)
-       id_so4_1a = lptr_so4_cw_amode(1) - loffset
-       id_so4_2a = lptr_so4_cw_amode(2) - loffset
-       id_so4_3a = lptr_so4_cw_amode(3) - loffset
-       id_so4_4a = lptr_so4_cw_amode(5) - loffset
-       conc_obj%so4c(:ncol,:) &
-            = qcw(:,:,id_so4_1a) &
-            + qcw(:,:,id_so4_2a) &
-            + qcw(:,:,id_so4_3a) &
-            + qcw(:,:,id_so4_4a)
 
-        ! for 3-mode, so4 is assumed to be nh4hso4
-        ! the partial neutralization of so4 is handled by using a
-        !    -1 charge (instead of -2) in the electro-neutrality equation
-       conc_obj%nh4c(:ncol,:) = 0._r8
-
-       ! with 3-mode, assume so4 is nh4hso4, and so half-neutralized
-       conc_obj%so4_fact = 1._r8
-#endif  
     endif
 
   end function sox_cldaero_create_obj
@@ -205,7 +153,8 @@ contains
 !----------------------------------------------------------------------------------
   subroutine sox_cldaero_update( &
        ncol, lchnk, loffset, dtime, mbar, pdel, press, tfld, cldnum, cldfrc, cfact, xlwc, &
-       delso4_hprxn, xh2so4, xso4, xso4_init, nh3g, hno3g, xnh3, xhno3, xnh4c,  xno3c, xmsa, xso2, xh2o2, qcw, qin )
+       delso4_hprxn, xh2so4, xso4, xso4_init, nh3g, hno3g, xnh3, xhno3, xnh4c,  xno3c, xmsa, xso2, xh2o2, qcw, qin, &
+       aqso4, aqh2so4, aqso4_h2o2, aqso4_o3, aqso4_h2o2_3d, aqso4_o3_3d)
 
     ! args 
 
@@ -241,6 +190,14 @@ contains
 
     real(r8), intent(inout) :: qcw(:,:,:) ! cloud-borne aerosol (vmr)
     real(r8), intent(inout) :: qin(:,:,:) ! xported species ( vmr )
+
+    real(r8), intent(out) :: aqso4(:,:)                   ! aqueous phase chemistry
+    real(r8), intent(out) :: aqh2so4(:,:)                 ! aqueous phase chemistry
+    real(r8), intent(out) :: aqso4_h2o2(:)                ! SO4 aqueous phase chemistry due to H2O2 (kg/m2)
+    real(r8), intent(out) :: aqso4_o3(:)                  ! SO4 aqueous phase chemistry due to O3 (kg/m2)
+    real(r8), intent(out), optional :: aqso4_h2o2_3d(:,:)                ! SO4 aqueous phase chemistry due to H2O2 (kg/m2)
+    real(r8), intent(out), optional :: aqso4_o3_3d(:,:)                  ! SO4 aqueous phase chemistry due to O3 (kg/m2)
+
 
     ! local vars ...
 
@@ -495,42 +452,59 @@ contains
        m = lptr_so4_cw_amode(n)
        l = m - loffset
        if (l > 0) then
-          sflx(:)=0._r8
+          aqso4(:,n)=0._r8
           do k=1,pver
              do i=1,ncol
-                sflx(i)=sflx(i)+dqdt_aqso4(i,k,l)*adv_mass(l)/mbar(i,k) &
+                aqso4(i,n)=aqso4(i,n)+dqdt_aqso4(i,k,l)*adv_mass(l)/mbar(i,k) &
                      *pdel(i,k)/gravit ! kg/m2/s
              enddo
           enddo
-          call outfld( trim(cnst_name_cw(m))//'AQSO4', sflx(:ncol), ncol, lchnk)
 
-          sflx(:)=0._r8
+          aqh2so4(:,n)=0._r8
           do k=1,pver
              do i=1,ncol
-                sflx(i)=sflx(i)+dqdt_aqh2so4(i,k,l)*adv_mass(l)/mbar(i,k) &
+                aqh2so4(i,n)=aqh2so4(i,n)+dqdt_aqh2so4(i,k,l)*adv_mass(l)/mbar(i,k) &
                      *pdel(i,k)/gravit ! kg/m2/s
              enddo
           enddo
-          call outfld( trim(cnst_name_cw(m))//'AQH2SO4', sflx(:ncol), ncol, lchnk)
        endif
     end do
 
-    sflx(:)=0._r8
+    aqso4_h2o2(:) = 0._r8
     do k=1,pver
        do i=1,ncol
-          sflx(i)=sflx(i)+dqdt_aqhprxn(i,k)*specmw_so4_amode/mbar(i,k) &
-               *pdel(i,k)/gravit ! kg SO4 /m2/s
+          aqso4_h2o2(i)=aqso4_h2o2(i)+dqdt_aqhprxn(i,k)*specmw_so4_amode/mbar(i,k) &
+                  *pdel(i,k)/gravit ! kg SO4 /m2/s
        enddo
     enddo
-    call outfld( 'AQSO4_H2O2', sflx(:ncol), ncol, lchnk)
-    sflx(:)=0._r8
+
+    if (present(aqso4_h2o2_3d)) then 
+       aqso4_h2o2_3d(:,:) = 0._r8
+       do k=1,pver
+          do i=1,ncol
+             aqso4_h2o2_3d(i,k)=dqdt_aqhprxn(i,k)*specmw_so4_amode/mbar(i,k) &
+                                *pdel(i,k)/gravit ! kg SO4 /m2/s
+          enddo
+       enddo
+    end if
+
+    aqso4_o3(:)=0._r8
     do k=1,pver
        do i=1,ncol
-          sflx(i)=sflx(i)+dqdt_aqo3rxn(i,k)*specmw_so4_amode/mbar(i,k) &
-               *pdel(i,k)/gravit ! kg SO4 /m2/s
+          aqso4_o3(i)=aqso4_o3(i)+dqdt_aqo3rxn(i,k)*specmw_so4_amode/mbar(i,k) &
+                  *pdel(i,k)/gravit ! kg SO4 /m2/s
        enddo
     enddo
-    call outfld( 'AQSO4_O3', sflx(:ncol), ncol, lchnk)
+
+    if (present(aqso4_o3_3d)) then
+       aqso4_o3_3d(:,:)=0._r8
+       do k=1,pver
+          do i=1,ncol
+             aqso4_o3_3d(i,k)=dqdt_aqo3rxn(i,k)*specmw_so4_amode/mbar(i,k) &
+                              *pdel(i,k)/gravit ! kg SO4 /m2/s
+          enddo
+       enddo
+    end if
 
   end subroutine sox_cldaero_update
 

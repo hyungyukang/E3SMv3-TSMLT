@@ -74,7 +74,6 @@
         subroutine strat_aer_settl_init
 
           use cam_history,  only : addfld
-          use ppgrid,       only : pver
 
           implicit none
 
@@ -88,7 +87,6 @@
                                      hno3_cond, radius_nat, ncol, lchnk, aero_ndx )
 
       use ppgrid,      only : pcols, pver
-      use chem_mods,   only : adv_mass
       use physconst,   only : gravit
       use cam_history, only : outfld
 

@@ -4,12 +4,12 @@
 !-------------------------------------------------------------------
 module tracer_srcs
 
-  use shr_kind_mod, only: r8 => shr_kind_r8
+  use shr_kind_mod,     only: r8 => shr_kind_r8
   use cam_abortutils,   only : endrun
-  use spmd_utils,   only : masterproc
+  use spmd_utils,       only : masterproc
 
-  use tracer_data,  only : trfld,trfile,MAXTRCRS
-  use cam_logfile,  only : iulog
+  use tracer_data,      only : trfld,trfile,MAXTRCRS
+  use cam_logfile,      only : iulog
 
   implicit none
 
@@ -52,8 +52,6 @@ contains
     use mo_chem_utls, only : get_extfrc_ndx
     use tracer_data,  only : trcdata_init
     use cam_history,  only : addfld
-    use ppgrid,       only : pver
-    use physics_buffer, only : physics_buffer_desc
 
     implicit none
 

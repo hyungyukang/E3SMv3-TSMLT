@@ -9,10 +9,10 @@ module dust_sediment_mod
 !
 !---------------------------------------------------------------------------------
 
-  use shr_kind_mod,  only: r8=>shr_kind_r8
-  use ppgrid,        only: pcols, pver, pverp
-  use physconst,     only: gravit, rair
-  use cam_logfile,   only: iulog
+  use shr_kind_mod,      only: r8=>shr_kind_r8
+  use ppgrid,            only: pcols, pver, pverp
+  use physconst,         only: gravit, rair
+  use cam_logfile,       only: iulog
   use cam_abortutils,    only: endrun
 
   private
@@ -207,11 +207,19 @@ contains
 !     calculate the derivatives for the interpolating polynomial
     call cfdotmc_pro (ncol, xw, psi, fdot)
 
+    
+!   do k = 2,pver
+!      do i = 1,ncol
+!         print*, 'HGVEL',vel(i,k),xw(i,k),phi(i,k),psi(i,k)
+!   end do
+!   end do
 !  NEW WAY
+
 !     calculate fluxes at interior pts
     do k = 2,pver
        do i = 1,ncol
           xxk(i,k) = xw(i,k)-vel(i,k)*deltat
+!         print*, 'HGPHI',phi(i,k),vel(i,k),deltat,flux(i,k)
        end do
     end do
     do k = 2,pver
@@ -276,6 +284,8 @@ contains
 ! first find the interval 
     do k =  1,pverp-1
        do i = 1,ncol
+          !print*, 'HGINT',xins(i),x(i,k),(xins(i)-x(i,k))*(x(i,k+1)-xins(i))
+          !print*, 'HGINT',xin(i),x(i,pverp),x(i,1)
           if ((xins(i)-x(i,k))*(x(i,k+1)-xins(i)).ge.0._r8) then
              intz(i) = k
           endif

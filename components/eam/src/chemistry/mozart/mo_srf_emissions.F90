@@ -3,21 +3,20 @@ module mo_srf_emissions
   ! 	... surface emissions module
   !---------------------------------------------------------------
 
-  use shr_kind_mod, only : r8 => shr_kind_r8
-  use chem_mods,    only : gas_pcnst
-  use spmd_utils,   only : masterproc,iam
-  use mo_tracname,  only : solsym
-  use cam_abortutils,   only : endrun
-  use ioFileMod,    only : getfil
-  use ppgrid,       only : pcols, begchunk, endchunk
-  use cam_logfile,  only : iulog
-  use tracer_data,  only : trfld,trfile
+  use shr_kind_mod,  only : r8 => shr_kind_r8
+  use chem_mods,     only : gas_pcnst
+  use spmd_utils,    only : masterproc
+  use cam_abortutils,only : endrun
+  use ioFileMod,     only : getfil
+  use cam_logfile,   only : iulog
+  use tracer_data,   only : trfld,trfile
 
   implicit none
 
   type :: emission
      integer           :: spc_ndx
      real(r8)          :: mw
+     real(r8)          :: scalefactor
      character(len=256):: filename
      character(len=16) :: species
      character(len=8)  :: units
@@ -36,26 +35,28 @@ module mo_srf_emissions
   real(r8), parameter :: amufac = 1.65979e-23_r8         ! 1.e4* kg / amu
   logical :: has_emis(gas_pcnst)
   type(emission), allocatable :: emissions(:)
-  integer                     :: n_emis_species 
-  integer :: c10h16_ndx, isop_ndx, dms_ndx
+  integer                     :: n_emis_files 
+  integer :: c10h16_ndx, isop_ndx
 
 contains
 
-  subroutine srf_emissions_inti( srf_emis_specifier, emis_type, emis_cycle_yr, emis_fixed_ymd, emis_fixed_tod )
+  subroutine srf_emissions_inti( srf_emis_specifier, emis_type_in, emis_cycle_yr, emis_fixed_ymd, emis_fixed_tod )
 
     !-----------------------------------------------------------------------
     ! 	... initialize the surface emissions
     !-----------------------------------------------------------------------
 
     use chem_mods,        only : adv_mass
-    use mo_constants,     only : d2r, pi, rearth
-    use string_utils,     only : to_upper
     use mo_chem_utls,     only : get_spc_ndx 
     use tracer_data,      only : trcdata_init
     use cam_pio_utils,    only : cam_pio_openfile
     use pio,              only : pio_inquire, pio_nowrite, pio_closefile, pio_inq_varndims
-    use pio,              only : pio_inq_varname, file_desc_t
+    use pio,              only : pio_inq_varname, pio_inq_vardimid, pio_inq_dimid
+    use pio,              only : file_desc_t, pio_get_att, PIO_NOERR, PIO_GLOBAL
+    use pio,              only : pio_seterrorhandling, PIO_BCAST_ERROR,PIO_INTERNAL_ERROR
     use chem_surfvals,    only : flbc_list
+    use string_utils,     only : GLC
+    use m_MergeSorts,     only : IndexSort
 
     implicit none
 
@@ -63,7 +64,7 @@ contains
     ! 	... dummy arguments
     !-----------------------------------------------------------------------
     character(len=*), intent(in) :: srf_emis_specifier(:)
-    character(len=*), intent(in) :: emis_type
+    character(len=*), intent(in) :: emis_type_in
     integer,          intent(in) :: emis_cycle_yr
     integer,          intent(in) :: emis_fixed_ymd
     integer,          intent(in) :: emis_fixed_tod
@@ -76,12 +77,15 @@ contains
     character(len=16)  :: spc_name
     character(len=256) :: filename
 
-    character(len=16)  ::    emis_species(gas_pcnst)
-    character(len=256) ::    emis_filenam(gas_pcnst)
-    integer ::    emis_indexes(gas_pcnst)
+    character(len=16)  :: emis_species(gas_pcnst)
+    character(len=256) :: emis_filenam(gas_pcnst)
+    integer  :: emis_indexes(gas_pcnst)
+    integer  :: indx(gas_pcnst)
+    real(r8) :: emis_scalefactor(gas_pcnst)
 
-    integer :: vid, nvars, isec
-    integer, allocatable :: vndims(:)
+    integer :: vid, nvars, isec, num_dims_emis
+    integer :: vndims
+    logical, allocatable :: is_sector(:)
     type(file_desc_t) :: ncid
     character(len=32)  :: varname
     character(len=256) :: locfn
@@ -89,9 +93,19 @@ contains
     character(len=1), parameter :: filelist = ''
     character(len=1), parameter :: datapath = ''
     logical         , parameter :: rmv_file = .false.
-
+    logical :: unstructured
+    character(len=32) :: emis_type = ' '
+    character(len=80) :: file_interp_type = ' '
+    character(len=256) :: tmp_string = ' '
+    character(len=32) :: xchr = ' '
+    real(r8) :: xdbl
+    integer :: time_dimid, ncol_dimid
+    integer, allocatable :: dimids(:)
+    
     has_emis(:) = .false.
     nn = 0
+    indx(:) = 0
+
 
     count_emis: do n=1,gas_pcnst
        if ( len_trim(srf_emis_specifier(n) ) == 0 ) then
@@ -100,74 +114,134 @@ contains
 
        i = scan(srf_emis_specifier(n),'->')
        spc_name = trim(adjustl(srf_emis_specifier(n)(:i-1)))
-       filename = trim(adjustl(srf_emis_specifier(n)(i+2:)))
+       
+       ! need to parse out scalefactor ...
+       tmp_string = adjustl(srf_emis_specifier(n)(i+2:))
+       j = scan( tmp_string, '*' )
+       if (j>0) then
+          xchr = tmp_string(1:j-1) ! get the multipler (left of the '*')
+          read( xchr, * ) xdbl   ! convert the string to a real
+          tmp_string = adjustl(tmp_string(j+1:)) ! get the filepath name (right of the '*')
+       else
+          xdbl = 1._r8
+       endif
+       if (masterproc) write(iulog,*) 'BEFORE ',gas_pcnst,trim(tmp_string)
+       filename = trim(tmp_string)
 
        m = get_spc_ndx(spc_name)
 
        if (m > 0) then
           has_emis(m) = .true.
-          has_emis(m) = has_emis(m) .and. ( .not. any( flbc_list == spc_name ) )
        else 
           write(iulog,*) 'srf_emis_inti: spc_name ',spc_name,' is not included in the simulation'
           call endrun('srf_emis_inti: invalid surface emission specification')
        endif
 
-       if ( has_emis(m) ) then
-          nn = nn+1
-          emis_species(nn) = spc_name
-          emis_filenam(nn) = filename
-          emis_indexes(nn) = m
+       if (any( flbc_list == spc_name )) then
+          call endrun('srf_emis_inti: ERROR -- cannot specify both fixed LBC ' &
+                    //'and emissions for the same species: '//trim(spc_name))
        endif
+
+       nn = nn+1
+       emis_species(nn) = spc_name
+       emis_filenam(nn) = filename
+       emis_indexes(nn) = m
+       emis_scalefactor(nn) = xdbl
+
+       indx(n)=n
+
     enddo count_emis
 
-    n_emis_species = count(has_emis(:))
+    n_emis_files = nn
 
-    if (masterproc) write(iulog,*) 'srf_emis_inti: n_emis_species = ',n_emis_species
+    if (masterproc) write(iulog,*) 'srf_emis_inti: n_emis_files = ',n_emis_files
 
-    allocate( emissions(n_emis_species), stat=astat )
+    allocate( emissions(n_emis_files), stat=astat )
     if( astat/= 0 ) then
        write(iulog,*) 'srf_emis_inti: failed to allocate emissions array; error = ',astat
-       call endrun
+       call endrun('srf_emis_inti: failed to allocate emissions array')
     end if
+
+    if (masterproc) write(iulog,*) 'BEFORE IndexSort'
+    !-----------------------------------------------------------------------
+    ! Sort the input files so that the emissions sources are summed in the 
+    ! same order regardless of the order of the input files in the namelist
+    !-----------------------------------------------------------------------
+    if (n_emis_files > 0) then
+      call IndexSort(n_emis_files, indx, emis_filenam)
+    end if
+    if (masterproc) write(iulog,*) 'AFTER  IndexSort'
 
     !-----------------------------------------------------------------------
     ! 	... setup the emission type array
     !-----------------------------------------------------------------------
-    do m=1,n_emis_species 
-       emissions(m)%spc_ndx          = emis_indexes(m)
+    do m=1,n_emis_files 
+       emissions(m)%spc_ndx          = emis_indexes(indx(m))
        emissions(m)%units            = 'Tg/y'
-       emissions(m)%species          = emis_species(m)
-       emissions(m)%mw               = adv_mass(emis_indexes(m))                     ! g / mole
-       emissions(m)%filename         = emis_filenam(m)
+       emissions(m)%species          = emis_species(indx(m))
+       emissions(m)%mw               = adv_mass(emis_indexes(indx(m)))                     ! g / mole
+       emissions(m)%filename         = emis_filenam(indx(m))
+       emissions(m)%scalefactor      = emis_scalefactor(indx(m))
     enddo
 
     !-----------------------------------------------------------------------
     ! read emis files to determine number of sectors
     !-----------------------------------------------------------------------
-    spc_loop: do m = 1, n_emis_species
+    spc_loop: do m = 1, n_emis_files
 
        emissions(m)%nsectors = 0
        
+       if (masterproc) write(iulog,*) 'BEFORE getfil',emissions(m)%filename
        call getfil (emissions(m)%filename, locfn, 0)
+       if (masterproc) write(iulog,*) 'AFTER  getfil',emissions(m)%filename
        call cam_pio_openfile ( ncid, trim(locfn), PIO_NOWRITE)
-       ierr = pio_inquire (ncid, nvariables=nvars)
+       if (masterproc) write(iulog,*) 'AFTER  pio_openfile',trim(locfn)
+       ierr = pio_inquire (ncid, nVariables=nvars)
 
-       allocate(vndims(nvars))
+
+       call pio_seterrorhandling(ncid, PIO_BCAST_ERROR)
+       ierr = pio_inq_dimid( ncid, 'ncol', ncol_dimid )
+       unstructured = ierr==PIO_NOERR
+       call pio_seterrorhandling(ncid, PIO_INTERNAL_ERROR)
+
+       allocate(is_sector(nvars))
+       is_sector(:) = .false.
+       
+       if (unstructured) then
+          ierr = pio_inq_dimid( ncid, 'time', time_dimid )
+       end if
 
        do vid = 1,nvars
 
-          ierr = pio_inq_varndims (ncid, vid, vndims(vid))
+          ierr = pio_inq_varndims (ncid, vid, vndims)
 
-          if( vndims(vid) < 3 ) then
+          if (unstructured) then
+             num_dims_emis = 2
+          else
+             num_dims_emis = 3
+          endif
+
+          if( vndims < num_dims_emis ) then
              cycle
-          elseif( vndims(vid) > 3 ) then
+          elseif( vndims > num_dims_emis ) then
              ierr = pio_inq_varname (ncid, vid, varname)
-             write(iulog,*) 'srf_emis_inti: Skipping variable ', trim(varname),', ndims = ',vndims(vid), &
+             write(iulog,*) 'srf_emis_inti: Skipping variable ', trim(varname),', ndims = ',vndims, &
                   ' , species=',trim(emissions(m)%species)
              cycle
           end if
 
-          emissions(m)%nsectors = emissions(m)%nsectors+1
+          if (unstructured) then
+             allocate( dimids(vndims) )
+             ierr = pio_inq_vardimid( ncid, vid, dimids )
+             if ( any(dimids(:)==ncol_dimid) .and. any(dimids(:)==time_dimid) ) then
+                emissions(m)%nsectors = emissions(m)%nsectors+1
+                is_sector(vid)=.true.
+             endif
+             deallocate(dimids)
+          else
+             emissions(m)%nsectors = emissions(m)%nsectors+1
+             is_sector(vid)=.true.
+          end if
 
        enddo
 
@@ -180,28 +254,42 @@ contains
        isec = 1
 
        do vid = 1,nvars
-          if( vndims(vid) == 3 ) then
+          if( is_sector(vid) ) then
              ierr = pio_inq_varname(ncid, vid, emissions(m)%sectors(isec))
              isec = isec+1
           endif
-
        enddo
-       deallocate(vndims)
+       deallocate(is_sector)
+
+       ! Global attribute 'input_method' overrides the srf_emis_type namelist setting on
+       ! a file-by-file basis.  If the emis file does not contain the 'input_method' 
+       ! attribute then the srf_emis_type namelist setting is used.
+       call pio_seterrorhandling(ncid, PIO_BCAST_ERROR)
+       ierr = pio_get_att(ncid, PIO_GLOBAL, 'input_method', file_interp_type)
+       call pio_seterrorhandling(ncid, PIO_INTERNAL_ERROR)
+       if ( ierr == PIO_NOERR) then
+          l = GLC(file_interp_type)
+          emis_type(1:l) = file_interp_type(1:l)
+          emis_type(l+1:) = ' '
+       else
+          emis_type = trim(emis_type_in)
+       endif
+
        call pio_closefile (ncid)
 
        allocate(emissions(m)%file%in_pbuf(size(emissions(m)%sectors)))
        emissions(m)%file%in_pbuf(:) = .false.
+
        call trcdata_init( emissions(m)%sectors, &
                           emissions(m)%filename, filelist, datapath, &
                           emissions(m)%fields,  &
                           emissions(m)%file, &
-                          rmv_file, emis_cycle_yr, emis_fixed_ymd, emis_fixed_tod, emis_type )
+                          rmv_file, emis_cycle_yr, emis_fixed_ymd, emis_fixed_tod, trim(emis_type) )
 
     enddo spc_loop
 
     c10h16_ndx = get_spc_ndx('C10H16')
     isop_ndx = get_spc_ndx('ISOP')
-    dms_ndx = get_spc_ndx('DMS')
 
   end subroutine srf_emissions_inti
 
@@ -225,14 +313,14 @@ contains
     !-----------------------------------------------------------------------
     integer :: m
 
-    do m = 1,n_emis_species
+    do m = 1,n_emis_files
        call advance_trcdata( emissions(m)%fields, emissions(m)%file, state, pbuf2d  )
     end do
 
   end subroutine set_srf_emissions_time
 
   ! adds surf flux specified in file to sflx
-  subroutine set_srf_emissions( lchnk, ncol, dms_emis_scale, sflx )
+  subroutine set_srf_emissions( lchnk, ncol, sflx )
     !--------------------------------------------------------
     !	... form the surface fluxes for this latitude slice
     !--------------------------------------------------------
@@ -249,7 +337,6 @@ contains
     !--------------------------------------------------------
     integer,  intent(in)  :: ncol                  ! columns in chunk
     integer,  intent(in)  :: lchnk                 ! chunk index
-    real(r8), intent(in)  :: dms_emis_scale        ! scaling dms emissions
     real(r8), intent(out) :: sflx(:,:) ! surface emissions ( kg/m^2/s )
 
     !--------------------------------------------------------
@@ -292,26 +379,22 @@ contains
     !--------------------------------------------------------
     !	... set non-zero emissions
     !--------------------------------------------------------
-    emis_loop : do m = 1,n_emis_species
+    emis_loop : do m = 1,n_emis_files
 
        n = emissions(m)%spc_ndx
 
        flux(:) = 0._r8
        do isec = 1,emissions(m)%nsectors
-          flux(:ncol) = flux(:ncol) + emissions(m)%fields(isec)%data(:ncol,1,lchnk)
+          flux(:ncol) = flux(:ncol) + emissions(m)%scalefactor*emissions(m)%fields(isec)%data(:ncol,1,lchnk)
        enddo
 
-       if ( n == dms_ndx ) then
-          flux(:ncol) = dms_emis_scale * flux(:ncol)
-       endif
-
        units = to_lower(trim(emissions(m)%fields(1)%units(:GLC(emissions(m)%fields(1)%units))))
-       
+
        if ( any( mks_units(:) == units ) ) then
-          sflx(:ncol,n) = flux(:ncol)
+          sflx(:ncol,n) = sflx(:ncol,n) + flux(:ncol)
        else
           mfactor = amufac * emissions(m)%mw
-          sflx(:ncol,n) = flux(:ncol) * mfactor
+          sflx(:ncol,n) = sflx(:ncol,n) + flux(:ncol) * mfactor
        endif
 
     end do emis_loop

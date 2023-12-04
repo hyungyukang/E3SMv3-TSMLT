@@ -4,11 +4,11 @@
 !-------------------------------------------------------------------
 module prescribed_ozone
 
-  use shr_kind_mod, only : r8 => shr_kind_r8
+  use shr_kind_mod,     only : r8 => shr_kind_r8
   use cam_abortutils,   only : endrun
-  use spmd_utils,   only : masterproc
-  use tracer_data,  only : trfld, trfile
-  use cam_logfile,  only : iulog
+  use spmd_utils,       only : masterproc
+  use tracer_data,      only : trfld, trfile
+  use cam_logfile,      only : iulog
 
   implicit none
   private
@@ -62,10 +62,6 @@ contains
 
     use tracer_data, only : trcdata_init
     use cam_history, only : addfld
-    use ppgrid,      only : pver
-    use error_messages, only: handle_err
-    use ppgrid,         only: pcols, pver, begchunk, endchunk
-    use physics_buffer, only : physics_buffer_desc
 
     implicit none
 
@@ -180,7 +176,7 @@ subroutine prescribed_ozone_readnl(nlfile)
    fixed_tod  = prescribed_ozone_fixed_tod
 
    ! Turn on prescribed volcanics if user has specified an input dataset.
-   if (len_trim(filename) > 0 ) has_prescribed_ozone = .true.
+   if (len_trim(filename) > 0 .and. filename.ne.'NONE') has_prescribed_ozone = .true.
 
 end subroutine prescribed_ozone_readnl
 

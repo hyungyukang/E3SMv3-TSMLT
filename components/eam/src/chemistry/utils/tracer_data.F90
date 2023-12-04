@@ -1,59 +1,52 @@
 module tracer_data
-!----------------------------------------------------------------------- 
+!-----------------------------------------------------------------------
 ! module used to read (and interpolate) offline tracer data (sources and
 ! mixing ratios)
 ! Created by: Francis Vitt -- 2 May 2006
 ! Modified by : Jim Edwards -- 10 March 2009
 ! Modified by : Cheryl Craig and Chih-Chieh (Jack) Chen  -- February 2010
-! Modified by : Jinbo Xie --March 2023
-!               Added a new option in interpolate_trcdata to work on linoz
-!               inputdata. A new UCI interpolation that better conserves
-!               mass in implemented and added a new function. It is called
-!               when linoz data are used in interpolate_trcdata.
-!
-!----------------------------------------------------------------------- 
+!-----------------------------------------------------------------------
 
-  use perf_mod,     only : t_startf, t_stopf
-  use shr_kind_mod, only : r8 => shr_kind_r8,r4 => shr_kind_r4, shr_kind_cl, SHR_KIND_CS
-  use time_manager, only : get_curr_date, get_step_size, get_curr_calday
-  use spmd_utils,   only : masterproc
-  use ppgrid,       only : pcols, pver, pverp, begchunk, endchunk
+  use perf_mod,         only : t_startf, t_stopf
+  use shr_kind_mod,     only : r8 => shr_kind_r8, shr_kind_cl
+  use time_manager,     only : get_curr_date, get_step_size
+  use spmd_utils,       only : masterproc
+  use ppgrid,           only : pcols, pver, pverp, begchunk, endchunk
   use cam_abortutils,   only : endrun
-  use cam_logfile,  only : iulog
-  
-  use physics_buffer, only : physics_buffer_desc, pbuf_get_field, pbuf_get_index
-  use time_manager, only : set_time_float_from_date, set_date_from_time_float
-  use pio,          only : file_desc_t, var_desc_t, &
-                           pio_seterrorhandling, pio_internal_error, pio_bcast_error, &
-                           pio_setdebuglevel, &
-                           pio_char, pio_noerr, &
-                           pio_inq_dimid, pio_inq_varid, &
-                           pio_def_dim, pio_def_var, &
-                           pio_put_att, pio_put_var, &
-                           pio_get_var, pio_get_att, pio_nowrite, pio_inq_dimlen, &
-                           pio_inq_vardimid, pio_inq_dimlen, pio_closefile, &
-                           pio_inquire_variable
+  use cam_logfile,      only : iulog
+
+  use physics_buffer,   only : physics_buffer_desc, pbuf_get_field, pbuf_get_index
+  use time_manager,     only : set_time_float_from_date, set_date_from_time_float
+  use pio,              only : file_desc_t, var_desc_t, &
+                               pio_seterrorhandling, pio_internal_error, pio_bcast_error, &
+                               pio_char, pio_noerr, &
+                               pio_inq_dimid, pio_inq_varid, &
+                               pio_def_dim, pio_def_var, &
+                               pio_put_att, pio_put_var, &
+                               pio_get_var, pio_get_att, pio_nowrite, pio_inq_dimlen, &
+                               pio_inq_vardimid, pio_inq_dimlen, pio_closefile, &
+                               pio_inquire_variable
 
   implicit none
 
   private  ! all unless made public
-  save 
+  save
 
   public :: trfld, input3d, input2d, trfile
   public :: trcdata_init
   public :: advance_trcdata
   public :: get_fld_data
-  public :: put_fld_data
   public :: get_fld_ndx
   public :: write_trc_restart
   public :: read_trc_restart
   public :: init_trc_restart
   public :: incr_filename
-  !added public for linoz new function diagnostic
-  public :: read_next_trcdata
-  public :: interpolate_trcdata
-  public :: get_model_time
-  !!PUBLIC MEMBERS
+#ifdef WACCM_TSMLT
+  public :: put_fld_data
+#endif
+
+
+  ! !PUBLIC MEMBERS
 
   type input3d
      real(r8), dimension(:,:,:), pointer :: data => null()
@@ -84,7 +77,7 @@ module tracer_data
      type(file_desc_t) :: curr_fileid
      type(file_desc_t) :: next_fileid
 
-     type(var_desc_t), pointer :: currfnameid => null() ! pio restart file var id 
+     type(var_desc_t), pointer :: currfnameid => null() ! pio restart file var id
      type(var_desc_t), pointer :: nextfnameid => null() ! pio restart file var id
 
      character(len=shr_kind_cl) :: filenames_list = ''
@@ -120,12 +113,20 @@ module tracer_data
      real(r8), pointer, dimension(:,:) :: weight_x => null(), weight_y => null()
      integer, pointer, dimension(:) :: count_x => null(), count_y => null()
      integer, pointer, dimension(:,:) :: index_x => null(), index_y => null()
+
+     real(r8), pointer, dimension(:,:) :: weight0_x=>null(), weight0_y=>null()
+     integer, pointer, dimension(:) :: count0_x=>null(), count0_y=>null()
+     integer, pointer, dimension(:,:) :: index0_x=>null(), index0_y=>null()
+     logical :: dist
+
      real(r8)                        :: p0
      type(var_desc_t) :: ps_id
      logical,  allocatable, dimension(:) :: in_pbuf
      logical :: has_ps = .false.
      logical :: zonal_ave = .false.
-     logical :: alt_data = .false.     
+     logical :: unstructured = .false.
+     logical :: alt_data = .false.
+     logical :: geop_alt = .false.
      logical :: cyclical = .false.
      logical :: cyclical_list = .false.
      logical :: weight_by_lat = .false.
@@ -134,9 +135,8 @@ module tracer_data
      logical :: fixed = .false.
      logical :: initialized = .false.
      logical :: top_bndry = .false.
+     logical :: top_layer = .false.
      logical :: stepTime = .false.  ! Do not interpolate in time, but use stepwise times
-     logical :: linoz_v3 = .false.  !set for linoz_v3 interpolation only
-     logical :: linoz_v2 = .false.  !set for linoz_v2 interpolation only
   endtype trfile
 
   integer, public, parameter :: MAXTRCRS = 100
@@ -157,6 +157,9 @@ module tracer_data
 
   integer :: plon, plat
 
+  integer,allocatable :: lon_global_grid_ndx(:,:)
+  integer,allocatable :: lat_global_grid_ndx(:,:)
+
 contains
 
 !--------------------------------------------------------------------------
@@ -165,13 +168,11 @@ contains
                            rmv_file, data_cycle_yr, data_fixed_ymd, data_fixed_tod, data_type )
 
     use mo_constants,    only : d2r
-    use cam_control_mod, only : nsrest
-    use dyn_grid,        only : get_dyn_grid_parm
-    use string_utils,    only : to_upper
+    use dyn_grid,        only : get_dyn_grid_parm, get_horiz_grid_d
+    use phys_grid,       only : get_rlat_all_p, get_rlon_all_p, get_ncols_p
+    use dycore,          only : dycore_is
     use horizontal_interpolate, only : xy_interp_init
-#if ( defined SPMD )
-    use mpishorthand,    only: mpicom, mpir8, mpiint
-#endif
+    use spmd_utils,       only: mpicom, mstrid=>masterprocid, mpi_real8, mpi_integer
 
     implicit none
 
@@ -187,6 +188,8 @@ contains
     integer,             intent(in)    :: data_fixed_tod
     character(len=*),    intent(in)    :: data_type
 
+    character(len=*), parameter :: sub = 'trcdata_init'
+
     integer :: f, mxnflds, astat
     integer :: str_yr, str_mon, str_day
     integer :: lon_dimid, lat_dimid, lev_dimid, tim_dimid, old_dimid
@@ -199,28 +202,33 @@ contains
     integer :: i1,i2,j1,j2
     integer :: nvardims, vardimids(4)
 
-    character(len=80) :: data_units
+    character(len=256) :: data_units
+    real(r8), allocatable :: lam(:), phi(:)
+    real(r8):: rlats(pcols), rlons(pcols)
+    integer :: lchnk, ncol, icol, i,j
+    logical :: found
+    integer :: aircraft_cnt
+    integer :: err_handling
 
     call specify_fields( specifier, flds )
 
     file%datatimep=-1.e36_r8
     file%datatimem=-1.e36_r8
 
-    mxnflds = 0 
+    mxnflds = 0
     if (associated(flds)) mxnflds = size( flds )
 
     if (mxnflds < 1) return
-    
+
     file%remove_trc_file = rmv_file
     file%pathname = trim(datapath)
     file%filenames_list = trim(filelist)
 
     file%fill_in_months = .false.
-    file%cyclical = .false.  
-    file%cyclical_list = .false.  
+    file%cyclical = .false.
+    file%cyclical_list = .false.
+    file%dist = .false.
 
-! does not work when compiled with pathf90
-!    select case ( to_upper(data_type) )
     select case ( data_type )
     case( 'FIXED' )
        file%fixed = .true.
@@ -233,7 +241,7 @@ contains
        file%cyclical_list = .true.
        file%cyc_yr = data_cycle_yr
     case( 'SERIAL' )
-    case default 
+    case default
        write(iulog,*) 'trcdata_init: invalid data type: '//trim(data_type)//' file: '//trim(filename)
        write(iulog,*) 'trcdata_init: valid data types: SERIAL | CYCLICAL | CYCLICAL_LIST | FIXED | INTERP_MISSING_MONTHS '
        call endrun('trcdata_init: invalid data type: '//trim(data_type)//' file: '//trim(filename))
@@ -245,6 +253,10 @@ contains
     if ( (.not.file%cyclical) .and. (data_cycle_yr>0._r8) ) then
        call endrun('trcdata_init: Cannot specify data_cycle_yr if data type is not CYCLICAL')
     endif
+
+    if (file%top_bndry .and. file%top_layer) then
+       call endrun('trcdata_init: Cannot set both file%top_bndry and file%top_layer to TRUE.')
+    end if
 
     if (masterproc) then
        write(iulog,*) 'trcdata_init: data type: '//trim(data_type)//' file: '//trim(filename)
@@ -281,41 +293,55 @@ contains
           file%one_yr = time2-time1
        endif
 
-       call open_trc_datafile( file%curr_filename, file%pathname, file%curr_fileid, file%curr_data_times, &
-            cyc_ndx_beg=file%cyc_ndx_beg, cyc_ndx_end=file%cyc_ndx_end, cyc_yr=file%cyc_yr )
+       if ( file%cyclical ) then
+          call open_trc_datafile( file%curr_filename, file%pathname, file%curr_fileid, file%curr_data_times, &
+               cyc_ndx_beg=file%cyc_ndx_beg, cyc_ndx_end=file%cyc_ndx_end, cyc_yr=file%cyc_yr )
+       else
+          call open_trc_datafile( file%curr_filename, file%pathname, file%curr_fileid, file%curr_data_times )
+       endif
     else
        call open_trc_datafile( file%curr_filename, file%pathname, file%curr_fileid, file%curr_data_times )
        file%curr_data_times = file%curr_data_times - file%offset_time
     endif
 
-    call pio_seterrorhandling(File%curr_fileid, PIO_BCAST_ERROR)
-    ierr = pio_inq_dimid( file%curr_fileid, 'lon', idx )
-    call pio_seterrorhandling(File%curr_fileid, PIO_INTERNAL_ERROR)
-
-    file%zonal_ave = (ierr/=PIO_NOERR)
+    call pio_seterrorhandling(File%curr_fileid, PIO_BCAST_ERROR, oldmethod=err_handling)
+    ierr = pio_inq_dimid( file%curr_fileid, 'ncol', idx )
+    file%unstructured = (ierr==PIO_NOERR)
+    if (.not.file%unstructured) then
+       ierr = pio_inq_dimid( file%curr_fileid, 'lon', idx )
+       file%zonal_ave = (ierr/=PIO_NOERR)
+    endif
+    call pio_seterrorhandling(File%curr_fileid, err_handling)
 
     plon = get_dyn_grid_parm('plon')
     plat = get_dyn_grid_parm('plat')
 
-    if ( .not. file%zonal_ave ) then
+    if ( file%zonal_ave ) then
 
-       call get_dimension( file%curr_fileid, 'lon', file%nlon, dimid=old_dimid, data=file%lons )
+       file%nlon = 1
 
-       file%lons =  file%lons * d2r
+    else
 
-       lon_dimid = old_dimid
+       if (.not. file%unstructured ) then
+          call get_dimension( file%curr_fileid, 'lon', file%nlon, dimid=old_dimid, data=file%lons )
 
+          file%lons =  file%lons * d2r
+
+          lon_dimid = old_dimid
+       end if
     endif
 
     ierr = pio_inq_dimid( file%curr_fileid, 'time', old_dimid)
 
-    ! Hack to work with weird netCDF and old gcc or NAG bug.
-    tim_dimid = old_dimid
+    if (.not. file%unstructured ) then
+       ! Hack to work with weird netCDF and old gcc or NAG bug.
+       tim_dimid = old_dimid
 
-    call get_dimension( file%curr_fileid, 'lat', file%nlat, dimid=old_dimid, data=file%lats )
-    file%lats =  file%lats * d2r
+       call get_dimension( file%curr_fileid, 'lat', file%nlat, dimid=old_dimid, data=file%lats )
+       file%lats =  file%lats * d2r
 
-    lat_dimid = old_dimid
+       lat_dimid = old_dimid
+    endif
 
     allocate( file%ps(file%nlon,file%nlat), stat=astat )
     if( astat /= 0 ) then
@@ -323,32 +349,45 @@ contains
        call endrun('trcdata_init: failed to allocate x array')
     end if
 
-    call pio_seterrorhandling(File%curr_fileid, PIO_BCAST_ERROR)
+    call pio_seterrorhandling(File%curr_fileid, PIO_BCAST_ERROR, oldmethod=err_handling)
     ierr = pio_inq_varid( file%curr_fileid, 'PS', file%ps_id )
     file%has_ps = (ierr==PIO_NOERR)
     ierr = pio_inq_dimid( file%curr_fileid, 'altitude', idx )
     file%alt_data = (ierr==PIO_NOERR)
 
-    call pio_seterrorhandling(File%curr_fileid, PIO_INTERNAL_ERROR)
+    call pio_seterrorhandling(File%curr_fileid, err_handling)
 
-    if ( file%has_ps) then
-       ierr = pio_inq_vardimid (file%curr_fileid, file%ps_id, dimids(1:3))
-       do did = 1,3
-          if      ( dimids(did) == lon_dimid ) then
-             file%ps_coords(LONDIM) = did
-             file%ps_order(did) = LONDIM
-          else if ( dimids(did) == lat_dimid ) then
-             file%ps_coords(LATDIM) = did
-             file%ps_order(did) = LATDIM
-          else if ( dimids(did) == tim_dimid ) then
-             file%ps_coords(PS_TIMDIM) = did
-             file%ps_order(did) = PS_TIMDIM
-          endif
-       enddo
+    if ( file%has_ps .and. .not.file%unstructured ) then
+       if ( file%zonal_ave ) then
+          ierr = pio_inq_vardimid (file%curr_fileid, file%ps_id, dimids(1:2))
+          do did = 1,2
+             if      ( dimids(did) == lat_dimid ) then
+                file%ps_coords(LATDIM) = did
+                file%ps_order(did) = LATDIM
+             else if ( dimids(did) == tim_dimid ) then
+                file%ps_coords(PS_TIMDIM) = did
+                file%ps_order(did) = PS_TIMDIM
+             endif
+          enddo
+       else
+          ierr = pio_inq_vardimid (file%curr_fileid, file%ps_id, dimids(1:3))
+          do did = 1,3
+             if      ( dimids(did) == lon_dimid ) then
+                file%ps_coords(LONDIM) = did
+                file%ps_order(did) = LONDIM
+             else if ( dimids(did) == lat_dimid ) then
+                file%ps_coords(LATDIM) = did
+                file%ps_order(did) = LATDIM
+             else if ( dimids(did) == tim_dimid ) then
+                file%ps_coords(PS_TIMDIM) = did
+                file%ps_order(did) = PS_TIMDIM
+             endif
+          enddo
+       end if
     endif
 
-    if (masterproc) then 
-       write(iulog,*) 'trcdata_init: file%has_ps = ' , file%has_ps 
+    if (masterproc) then
+       write(iulog,*) 'trcdata_init: file%has_ps = ' , file%has_ps
     endif ! masterproc
 
     if (file%alt_data) then
@@ -356,8 +395,6 @@ contains
        call get_dimension( file%curr_fileid, 'altitude',     file%nlev, dimid=old_dimid, data=file%levs  )
     else
        call get_dimension( file%curr_fileid, 'lev', file%nlev, dimid=old_dimid, data=file%levs  )
-       !!added for Linoz_v3
-       call get_dimension( file%curr_fileid, 'ilev', file%nilev, data=file%ilevs  )
        if (old_dimid>0) then
           file%levs =  file%levs*100._r8 ! mbar->pascals
        endif
@@ -381,9 +418,9 @@ contains
           call endrun('trcdata_init: failed to allocate file%hyai and file%hybi arrays')
        end if
 
-       call pio_seterrorhandling(File%curr_fileid, PIO_BCAST_ERROR)
+       call pio_seterrorhandling(File%curr_fileid, PIO_BCAST_ERROR, oldmethod=err_handling)
        ierr = pio_inq_varid( file%curr_fileid, 'P0', varid)
-       call pio_seterrorhandling(File%curr_fileid, PIO_INTERNAL_ERROR)
+       call pio_seterrorhandling(File%curr_fileid, err_handling)
 
        if ( ierr == PIO_NOERR ) then
           ierr = pio_get_var( file%curr_fileid, varid, file%p0 )
@@ -430,20 +467,20 @@ contains
        end if
     endif
 
+
+    call pio_seterrorhandling(File%curr_fileid, PIO_BCAST_ERROR, oldmethod=err_handling)
+
     flds_loop: do f = 1,mxnflds
-
-       ! initialize the coordinate values to -1,
-       ! to defend against fields that do not have certain dimension, e.g., zonal average surface fields
-       ! and check against it when assigning value to cnt3 for that dimension
-
-       do did = 1,4
-          flds(f)%coords(did) = -1
-       end do
 
        ! get netcdf variable id for the field
        ierr = pio_inq_varid( file%curr_fileid, flds(f)%srcnam, flds(f)%var_id )
+       if (ierr/=pio_noerr) then
+          call endrun('trcdata_init: Cannot find var "'//trim(flds(f)%srcnam)// &
+                      '" in file "'//trim(file%curr_filename)//'"')
+       endif
 
        ! determine if the field has a vertical dimension
+
        if (lev_dimid>0) then
           ierr = pio_inquire_variable(  file%curr_fileid, flds(f)%var_id, ndims=nvardims )
           ierr = pio_inquire_variable(  file%curr_fileid, flds(f)%var_id, dimids=vardimids(:nvardims) )
@@ -454,11 +491,11 @@ contains
 
        ! allocate memory only if not already in pbuf2d
 
-       if ( .not. file%in_pbuf(f) ) then 
-          if ( flds(f)%srf_fld .or. file%top_bndry ) then
-             allocate( flds(f)         %data(pcols,1,begchunk:endchunk), stat=astat   )
+       if ( .not. file%in_pbuf(f) ) then
+          if ( flds(f)%srf_fld .or. file%top_bndry .or. file%top_layer ) then
+             allocate( flds(f)%data(pcols,1,begchunk:endchunk), stat=astat   )
           else
-             allocate( flds(f)         %data(pcols,pver,begchunk:endchunk), stat=astat   )
+             allocate( flds(f)%data(pcols,pver,begchunk:endchunk), stat=astat   )
           endif
           if( astat/= 0 ) then
              write(iulog,*) 'trcdata_init: failed to allocate flds(f)%data array; error = ',astat
@@ -467,7 +504,7 @@ contains
        else
           flds(f)%pbuf_ndx = pbuf_get_index(flds(f)%fldnam,errcode)
        endif
-   
+
        if (flds(f)%srf_fld) then
           allocate( flds(f)%input(1)%data(pcols,1,begchunk:endchunk), stat=astat   )
        else
@@ -522,7 +559,7 @@ contains
                 flds(f)%order(did) = ZA_TIMDIM
              endif
           enddo
-       else if ( flds(f)%srf_fld ) then
+       else if ( flds(f)%srf_fld .and. .not.file%unstructured ) then
           ierr = pio_inq_vardimid (file%curr_fileid, flds(f)%var_id, dimids(1:3))
           do did = 1,3
              if      ( dimids(did) == lon_dimid ) then
@@ -536,7 +573,7 @@ contains
                 flds(f)%order(did) = PS_TIMDIM
              endif
           enddo
-       else
+       else if (.not. file%unstructured ) then
           ierr = pio_inq_vardimid (file%curr_fileid, flds(f)%var_id, dimids)
           do did = 1,4
              if      ( dimids(did) == lon_dimid ) then
@@ -556,24 +593,85 @@ contains
        endif
 
        ierr = pio_get_att( file%curr_fileid, flds(f)%var_id, 'units', data_units)
-       data_units = trim(data_units)
-       flds(f)%units = data_units(1:32)
+       flds(f)%units = trim(data_units(1:32))
 
     enddo flds_loop
 
+    call pio_seterrorhandling(File%curr_fileid, err_handling)
+
 ! if weighting by latitude, compute weighting for horizontal interpolation
     if( file%weight_by_lat ) then
+        if(dycore_is('UNSTRUCTURED') ) then
+          call endrun('trcdata_init: weighting by latitude not implemented for unstructured grids')
+        endif
+
 ! get dimensions of CAM resolution
         plon = get_dyn_grid_parm('plon')
         plat = get_dyn_grid_parm('plat')
-        
+
+        allocate(lam(plon), phi(plat))
+        call get_horiz_grid_d(plat, clat_d_out=phi)
+        call get_horiz_grid_d(plon, clon_d_out=lam)
+
+         if(.not.allocated(lon_global_grid_ndx)) allocate(lon_global_grid_ndx(pcols,begchunk:endchunk))
+         if(.not.allocated(lat_global_grid_ndx)) allocate(lat_global_grid_ndx(pcols,begchunk:endchunk))
+        lon_global_grid_ndx=-huge(1)
+        lat_global_grid_ndx=-huge(1)
+
+        do lchnk = begchunk, endchunk
+           ncol = get_ncols_p(lchnk)
+           call get_rlat_all_p(lchnk, ncol, rlats(:ncol))
+           call get_rlon_all_p(lchnk, ncol, rlons(:ncol))
+           do icol= 1,ncol
+              found=.false.
+              find_col: do j = 1,plat
+                 do i = 1,plon
+                    if (rlats(icol)==phi(j) .and. rlons(icol)==lam(i)) then
+                       found=.true.
+                       exit find_col
+                    endif
+                 enddo
+              enddo find_col
+
+              if (.not.found) call endrun('trcdata_init: not able find physics column coordinate')
+              lon_global_grid_ndx(icol,lchnk) = i
+              lat_global_grid_ndx(icol,lchnk) = j
+           end do
+        enddo
+
+        deallocate(phi,lam)
+
 ! weight_x & weight_y are weighting function for x & y interpolation
-        allocate(file%weight_x(plon,file%nlon))
-        allocate(file%weight_y(plat,file%nlat))
-        allocate(file%count_x(plon))
-        allocate(file%count_y(plat))
-        allocate(file%index_x(plon,file%nlon))
-        allocate(file%index_y(plat,file%nlat))
+        allocate(file%weight_x(plon,file%nlon), stat=astat)
+        if( astat /= 0 ) then
+           write(iulog,*) 'trcdata_init: file%weight_x allocation error = ',astat
+           call endrun('trcdata_init: failed to allocate weight_x array')
+        end if
+        allocate(file%weight_y(plat,file%nlat), stat=astat)
+        if( astat /= 0 ) then
+           write(iulog,*) 'trcdata_init: file%weight_y allocation error = ',astat
+           call endrun('trcdata_init: failed to allocate weight_y array')
+        end if
+        allocate(file%count_x(plon), stat=astat)
+        if( astat /= 0 ) then
+           write(iulog,*) 'trcdata_init: file%count_x allocation error = ',astat
+           call endrun('trcdata_init: failed to allocate count_x array')
+        end if
+        allocate(file%count_y(plat), stat=astat)
+        if( astat /= 0 ) then
+           write(iulog,*) 'trcdata_init: file%count_y allocation error = ',astat
+           call endrun('trcdata_init: failed to allocate count_y array')
+        end if
+        allocate(file%index_x(plon,file%nlon), stat=astat)
+        if( astat /= 0 ) then
+           write(iulog,*) 'trcdata_init: file%index_x allocation error = ',astat
+           call endrun('trcdata_init: failed to allocate index_x array')
+        end if
+        allocate(file%index_y(plat,file%nlat), stat=astat)
+        if( astat /= 0 ) then
+           write(iulog,*) 'trcdata_init: file%index_y allocation error = ',astat
+           call endrun('trcdata_init: failed to allocate index_y array')
+        end if
         file%weight_x(:,:) = 0.0_r8
         file%weight_y(:,:) = 0.0_r8
         file%count_x(:) = 0
@@ -581,14 +679,54 @@ contains
         file%index_x(:,:) = 0
         file%index_y(:,:) = 0
 
+        if( file%dist ) then
+           allocate(file%weight0_x(plon,file%nlon), stat=astat)
+           if( astat /= 0 ) then
+              write(iulog,*) 'trcdata_init: file%weight0_x allocation error = ',astat
+              call endrun('trcdata_init: failed to allocate weight0_x array')
+           end if
+           allocate(file%weight0_y(plat,file%nlat), stat=astat)
+           if( astat /= 0 ) then
+              write(iulog,*) 'trcdata_init: file%weight0_y allocation error = ',astat
+              call endrun('trcdata_init: failed to allocate weight0_y array')
+           end if
+           allocate(file%count0_x(plon), stat=astat)
+           if( astat /= 0 ) then
+              write(iulog,*) 'trcdata_init: file%count0_x allocation error = ',astat
+              call endrun('trcdata_init: failed to allocate count0_x array')
+           end if
+           allocate(file%count0_y(plat), stat=astat)
+           if( astat /= 0 ) then
+              write(iulog,*) 'trcdata_init: file%count0_y allocation error = ',astat
+              call endrun('trcdata_init: failed to allocate count0_y array')
+           end if
+           allocate(file%index0_x(plon,file%nlon), stat=astat)
+           if( astat /= 0 ) then
+              write(iulog,*) 'trcdata_init: file%index0_x allocation error = ',astat
+              call endrun('trcdata_init: failed to allocate index0_x array')
+           end if
+           allocate(file%index0_y(plat,file%nlat), stat=astat)
+           if( astat /= 0 ) then
+              write(iulog,*) 'trcdata_init: file%index0_y allocation error = ',astat
+              call endrun('trcdata_init: failed to allocate index0_y array')
+           end if
+           file%weight0_x(:,:) = 0.0_r8
+           file%weight0_y(:,:) = 0.0_r8
+           file%count0_x(:) = 0
+           file%count0_y(:) = 0
+           file%index0_x(:,:) = 0
+           file%index0_y(:,:) = 0
+        endif
+
         if(masterproc) then
-! compute weighting 
-            call xy_interp_init(file%nlon,file%nlat,file%lons,file%lats,plon,plat,file%weight_x,file%weight_y)
+! compute weighting
+            call xy_interp_init(file%nlon,file%nlat,file%lons,file%lats, &
+                                plon,plat,file%weight_x,file%weight_y,file%dist)
 
             do i2=1,plon
                file%count_x(i2) = 0
                do i1=1,file%nlon
-                  if(file%weight_x(i2,i1).gt.0.0_r8 ) then
+                  if(file%weight_x(i2,i1)>0.0_r8 ) then
                      file%count_x(i2) = file%count_x(i2) + 1
                      file%index_x(i2,file%count_x(i2)) = i1
                   endif
@@ -598,47 +736,84 @@ contains
             do j2=1,plat
                file%count_y(j2) = 0
                do j1=1,file%nlat
-                  if(file%weight_y(j2,j1).gt.0.0_r8 ) then
+                  if(file%weight_y(j2,j1)>0.0_r8 ) then
                      file%count_y(j2) = file%count_y(j2) + 1
                      file%index_y(j2,file%count_y(j2)) = j1
                   endif
                enddo
             enddo
+
+           if( file%dist ) then
+            call xy_interp_init(file%nlon,file%nlat,file%lons,file%lats,&
+                                plon,plat,file%weight0_x,file%weight0_y,file%dist)
+
+            do i2=1,plon
+               file%count0_x(i2) = 0
+               do i1=1,file%nlon
+                  if(file%weight0_x(i2,i1)>0.0_r8 ) then
+                     file%count0_x(i2) = file%count0_x(i2) + 1
+                     file%index0_x(i2,file%count0_x(i2)) = i1
+                  endif
+               enddo
+            enddo
+
+            do j2=1,plat
+               file%count0_y(j2) = 0
+               do j1=1,file%nlat
+                  if(file%weight0_y(j2,j1)>0.0_r8 ) then
+                     file%count0_y(j2) = file%count0_y(j2) + 1
+                     file%index0_y(j2,file%count0_y(j2)) = j1
+                  endif
+               enddo
+            enddo
+           endif
         endif
 
-#if ( defined SPMD)
-        call mpibcast(file%weight_x, plon*file%nlon, mpir8 , 0, mpicom)
-        call mpibcast(file%weight_y, plat*file%nlat, mpir8 , 0, mpicom)
-        call mpibcast(file%count_x, plon, mpiint , 0, mpicom)
-        call mpibcast(file%count_y, plat, mpiint , 0, mpicom)
-        call mpibcast(file%index_x, plon*file%nlon, mpiint , 0, mpicom)
-        call mpibcast(file%index_y, plat*file%nlat, mpiint , 0, mpicom)
-#endif
+        call mpi_bcast(file%weight_x, plon*file%nlon, mpi_real8 , mstrid, mpicom,ierr)
+        if (ierr /= 0) call endrun(sub//": FATAL: mpi_bcast: file%weight_x")
+        call mpi_bcast(file%weight_y, plat*file%nlat, mpi_real8 , mstrid, mpicom,ierr)
+        if (ierr /= 0) call endrun(sub//": FATAL: mpi_bcast: file%weight_y")
+        call mpi_bcast(file%count_x, plon, mpi_integer , mstrid, mpicom,ierr)
+        if (ierr /= 0) call endrun(sub//": FATAL: mpi_bcast: file%count_x")
+        call mpi_bcast(file%count_y, plat, mpi_integer , mstrid, mpicom,ierr)
+        if (ierr /= 0) call endrun(sub//": FATAL: mpi_bcast: file%count_y")
+        call mpi_bcast(file%index_x, plon*file%nlon, mpi_integer , mstrid, mpicom,ierr)
+        if (ierr /= 0) call endrun(sub//": FATAL: mpi_bcast: file%index_x")
+        call mpi_bcast(file%index_y, plat*file%nlat, mpi_integer , mstrid, mpicom,ierr)
+        if (ierr /= 0) call endrun(sub//": FATAL: mpi_bcast: file%index_y")
+        if( file%dist ) then
+           call mpi_bcast(file%weight0_x, plon*file%nlon, mpi_real8 , mstrid, mpicom,ierr)
+           if (ierr /= 0) call endrun(sub//": FATAL: mpi_bcast: file%weight0_x")
+           call mpi_bcast(file%weight0_y,  plat*file%nlat, mpi_real8 , mstrid, mpicom,ierr)
+           if (ierr /= 0) call endrun(sub//": FATAL: mpi_bcast: file%weight0_y")
+           call mpi_bcast(file%count0_x, plon, mpi_integer , mstrid, mpicom,ierr)
+           if (ierr /= 0) call endrun(sub//": FATAL: mpi_bcast: file%count0_x")
+           call mpi_bcast(file%count0_y, plon, mpi_integer , mstrid, mpicom,ierr)
+           if (ierr /= 0) call endrun(sub//": FATAL: mpi_bcast: file%count0_y")
+           call mpi_bcast(file%index0_x, plon*file%nlon, mpi_integer , mstrid, mpicom,ierr)
+           if (ierr /= 0) call endrun(sub//": FATAL: mpi_bcast: file%index0_x")
+           call mpi_bcast(file%index0_y,  plat*file%nlat, mpi_integer , mstrid, mpicom,ierr)
+           if (ierr /= 0) call endrun(sub//": FATAL: mpi_bcast: file%index0_y")
+        endif
     endif
 
   end subroutine trcdata_init
 
 !-----------------------------------------------------------------------
-! Reads more data if needed and interpolates data to current model time 
+! Reads more data if needed and interpolates data to current model time
 !-----------------------------------------------------------------------
   subroutine advance_trcdata( flds, file, state, pbuf2d )
     use physics_types,only : physics_state
-    use physics_buffer, only : physics_buffer_desc
-    use ppgrid, only : pver,pcols
 
     implicit none
 
     type(trfile),        intent(inout) :: file
     type(trfld),         intent(inout) :: flds(:)
     type(physics_state), intent(in)    :: state(begchunk:endchunk)
-    
-    type(physics_buffer_desc), optional, pointer :: pbuf2d(:,:)
-    integer :: ncol
+
+    type(physics_buffer_desc), pointer :: pbuf2d(:,:)
+
     real(r8) :: data_time
-    real(r8) :: t(pcols,pver)          ! input temperature (K)
-    real(r8) :: rho(pcols,pver)          ! input temperature (K)
-    real(r8) :: pmid(pcols,pver)       ! pressure at layer midpoints (pa)
-!--------------------------------------BLH-----------------------------------    
 
     call t_startf('advance_trcdata')
     if ( .not.( file%fixed .and. file%initialized ) ) then
@@ -650,32 +825,33 @@ contains
        if ( file%cyclical .or. file%cyclical_list ) then
           ! wrap around
           if ( (file%datatimep<file%datatimem) .and. (file%curr_mod_time>file%datatimem) ) then
-             data_time = data_time + file%one_yr 
+             data_time = data_time + file%one_yr
           endif
        endif
 
     ! For stepTime need to advance if the times are equal
     ! Should not impact other runs?
        if ( file%curr_mod_time >= data_time ) then
+!         if(masterproc) write(iulog,*) 'before READ_NEXT_TRCDATA ', flds%fldnam,file%curr_mod_time,data_time,file%one_yr
           call t_startf('read_next_trcdata')
-          call read_next_trcdata(state, flds, file )
+          call read_next_trcdata( flds, file )
           call t_stopf('read_next_trcdata')
-          if(masterproc) write(iulog,*) 'READ_NEXT_TRCDATA ', flds%fldnam
+          !if(masterproc) write(iulog,*) 'READ_NEXT_TRCDATA ', flds%fldnam
+!         if(masterproc) write(iulog,*) 'after READ_NEXT_TRCDATA ', flds%fldnam, file%datatimep
        end if
 
     endif
-    
+
+!   if(masterproc) write(iulog,*) 'end READ_NEXT_TRCDATA '
+
     ! need to interpolate the data, regardless
     ! each mpi task needs to interpolate
     call t_startf('interpolate_trcdata')
-    if(present(pbuf2d)) then
-       call interpolate_trcdata( state, flds, file, pbuf2d )
-    else
-       call interpolate_trcdata( state, flds, file )
-    endif
+    call interpolate_trcdata( state, flds, file, pbuf2d )
     call t_stopf('interpolate_trcdata')
 
     file%initialized = .true.
+!   if(masterproc) write(iulog,*) 'end advance_trcdata'
 
     call t_stopf('advance_trcdata')
 
@@ -685,7 +861,6 @@ contains
 !-------------------------------------------------------------------
   subroutine get_fld_data( flds, field_name, data, ncol, lchnk, pbuf )
 
-    use physics_buffer, only : physics_buffer_desc, pbuf_get_field
 
     implicit none
 
@@ -695,7 +870,7 @@ contains
     integer, intent(in) :: lchnk
     integer, intent(in) :: ncol
     type(physics_buffer_desc), pointer :: pbuf(:)
-    
+
 
     integer :: f, nflds
     real(r8),pointer  :: tmpptr(:,:)
@@ -730,7 +905,7 @@ contains
     integer, intent(in) :: lchnk
     integer, intent(in) :: ncol
     type(physics_buffer_desc), pointer :: pbuf(:)
-    
+
 
     integer :: f, nflds
     real(r8),pointer  :: tmpptr(:,:)
@@ -758,7 +933,7 @@ contains
 
     type(trfld), intent(in) :: flds(:)
     character(len=*), intent(in) :: field_name
-    integer, intent(out) :: idx    
+    integer, intent(out) :: idx
     integer :: f, nflds
 
     idx = -1
@@ -817,7 +992,7 @@ contains
               if ((file%curr_mod_time > file%datatimep)) then
 
                call advance_file(file)
-     
+
             endif
          endif
 
@@ -834,15 +1009,15 @@ contains
           file%next_data_times = file%next_data_times - file%offset_time
        endif
     endif
-    
+
     !-----------------------------------------------------------------------
     !        If using next_data_times and the current is greater than or equal to the next, then
     !        close the current file, and set up for next file.
     !-----------------------------------------------------------------------
     if ( associated(file%next_data_times) ) then
-       if (file%cyclical_list .and. list_cycled) then    ! special case - list cycled 
+       if (file%cyclical_list .and. list_cycled) then    ! special case - list cycled
 
-          file%datatimem = file%curr_data_times(size(file%curr_data_times)) 
+          file%datatimem = file%curr_data_times(size(file%curr_data_times))
           itms(1)=size(file%curr_data_times)
           fids(1)=file%curr_fileid
 
@@ -863,7 +1038,7 @@ contains
 
 !-----------------------------------------------------------------------
 !-----------------------------------------------------------------------
-  function incr_filename( filename, filenames_list, datapath, cyclical_list, list_cycled )
+  function incr_filename( filename, filenames_list, datapath, cyclical_list, list_cycled, abort )
 
     !-----------------------------------------------------------------------
     ! 	... Increment or decrement a date string withing a filename
@@ -876,25 +1051,30 @@ contains
 
     implicit none
 
-
     character(len=*),           intent(in)    :: filename ! present dynamical dataset filename
-    character(len=*), optional, intent(in)    :: filenames_list 
+    character(len=*), optional, intent(in)    :: filenames_list
     character(len=*), optional, intent(in)    :: datapath
     logical         , optional, intent(in)    :: cyclical_list  ! If true, allow list to cycle
     logical         , optional, intent(out)   :: list_cycled
-    character(len=shr_kind_cl)                :: incr_filename         ! next filename in the sequence
+    logical         , optional, intent(in)    :: abort
 
+    character(len=shr_kind_cl)                :: incr_filename         ! next filename in the sequence
 
     ! set new next_filename ...
 
     !-----------------------------------------------------------------------
     !	... local variables
     !-----------------------------------------------------------------------
-    integer :: pos, pos1, istat
+    integer :: pos, istat
     character(len=shr_kind_cl) :: fn_new, line, filepath
-    character(len=6)   :: seconds
-    character(len=5)   :: num
     integer :: ios,unitnumber
+    logical :: abort_run
+
+    if (present(abort)) then
+       abort_run = abort
+    else
+       abort_run = .true.
+    endif
 
     if (present(list_cycled)) list_cycled = .false.
 
@@ -926,45 +1106,57 @@ contains
        if ( present(datapath) ) then
          filepath = trim(datapath) //'/'// trim(filenames_list)
        else
-         filepath = trim(datapath)
+         filepath = trim(filenames_list)
        endif
 
        open( unit=unitnumber, file=filepath, iostat=ios, status="OLD")
        if (ios /= 0) then
-          call endrun('not able to open filenames_list file: '//trim(filepath))
+          call endrun('not able to open file: '//trim(filepath))
        endif
 
        !-------------------------------------------------------------------
        !  ...  read file names
        !-------------------------------------------------------------------
-       read( unit=unitnumber, fmt='(A)', iostat=ios ) line 
+       read( unit=unitnumber, fmt='(A)', iostat=ios ) line
        if (ios /= 0) then
-          call endrun('not able to increment file name from filenames_list file: '//trim(filenames_list))
+          if (abort_run) then
+             call endrun('not able to increment file name from filenames_list file: '//trim(filenames_list))
+          else
+             fn_new = 'NOT_FOUND'
+             incr_filename = trim(fn_new)
+             return
+          endif
        endif
 
        !-------------------------------------------------------------------
        !      If current filename is '', then initialize with the first filename read in
        !      and skip this section.
        !-------------------------------------------------------------------
-       if (filename /= '') then 
+       if (filename /= '') then
 
           !-------------------------------------------------------------------
           !       otherwise read until find current filename
           !-------------------------------------------------------------------
           do while( trim(line) /= trim(filename) )
-             read( unit=unitnumber, fmt='(A)', iostat=ios ) line 
+             read( unit=unitnumber, fmt='(A)', iostat=ios ) line
              if (ios /= 0) then
-                call endrun('not able to increment file name from filenames_list file: '//trim(filenames_list))
+                if (abort_run) then
+                   call endrun('not able to increment file name from filenames_list file: '//trim(filenames_list))
+                else
+                   fn_new = 'NOT_FOUND'
+                   incr_filename = trim(fn_new)
+                   return
+                endif
              endif
           enddo
-   
+
           !-------------------------------------------------------------------
           !      Read next filename
           !-------------------------------------------------------------------
-          read( unit=unitnumber, fmt='(A)', iostat=ios ) line 
+          read( unit=unitnumber, fmt='(A)', iostat=ios ) line
 
           !---------------------------------------------------------------------------------
-          !       If cyclical_list, then an end of file is not an error, but rather 
+          !       If cyclical_list, then an end of file is not an error, but rather
           !       a signal to rewind and start over
           !---------------------------------------------------------------------------------
 
@@ -973,7 +1165,7 @@ contains
                 if (cyclical_list) then
                    list_cycled=.true.
                    rewind(unitnumber)
-                   read( unit=unitnumber, fmt='(A)', iostat=ios ) line 
+                   read( unit=unitnumber, fmt='(A)', iostat=ios ) line
                      ! Error here should never happen, but check just in case
                    if (ios /= 0) then
                       call endrun('not able to increment file name from filenames_list file: '//trim(filenames_list))
@@ -982,7 +1174,13 @@ contains
                    call endrun('not able to increment file name from filenames_list file: '//trim(filenames_list))
                 endif
              else
-                call endrun('not able to increment file name from filenames_list file: '//trim(filenames_list))
+                if (abort_run) then
+                   call endrun('not able to increment file name from filenames_list file: '//trim(filenames_list))
+                else
+                   fn_new = 'NOT_FOUND'
+                   incr_filename = trim(fn_new)
+                   return
+                endif
              endif
           endif
 
@@ -998,7 +1196,7 @@ contains
     endif
 
     !---------------------------------------------------------------------------------
-    !      return the current filename 
+    !      return the current filename
     !---------------------------------------------------------------------------------
     incr_filename = trim(fn_new)
     if ( masterproc ) write(iulog,*) 'incr_flnm: new filename = ',trim(incr_filename)
@@ -1008,6 +1206,8 @@ contains
 !------------------------------------------------------------------------------
 !------------------------------------------------------------------------------
   subroutine find_times( itms, fids, time, file, datatimem, datatimep, times_found )
+
+!   use intp_util, only: findplb
 
     implicit none
 
@@ -1021,7 +1221,7 @@ contains
     logical, intent(inout)  :: times_found
 
     integer :: np1        ! current forward time index of dataset
-    integer :: n,i      ! 
+    integer :: n,i      !
     integer :: curr_tsize, next_tsize, all_tsize
     integer :: astat
     integer :: cyc_tsize
@@ -1046,19 +1246,19 @@ contains
     if ( .not. file%cyclical ) then
        if ( all( all_data_times(:) > time ) ) then
           write(iulog,*) 'FIND_TIMES: ALL data times are after ', time
-          write(iulog,*) 'FIND_TIMES: data times: ',all_data_times(:)
-          write(iulog,*) 'FIND_TIMES: time: ',time
+          write(iulog,*) 'FIND_TIMES: file: ', trim(file%curr_filename)
+          write(iulog,*) 'FIND_TIMES: time: ', time
           call endrun('find_times: all(all_data_times(:) > time) '// trim(file%curr_filename) )
        endif
 
-       ! find bracketing times 
+       ! find bracketing times
        find_times_loop : do n=1, all_tsize-1
           np1 = n + 1
           datatimem = all_data_times(n)   !+ file%offset_time
           datatimep = all_data_times(np1) !+ file%offset_time
        ! When stepTime, datatimep may not equal the time (as only datatimem is used)
        ! Should not break other runs?
-          if ( (time .ge. datatimem) .and. (time .lt. datatimep) ) then
+          if ( (time >= datatimem) .and. (time < datatimep) ) then
              times_found = .true.
              exit find_times_loop
           endif
@@ -1078,9 +1278,13 @@ contains
              np1 = n+1
           endif
 
-          datatimem = all_data_times(n  +file%cyc_ndx_beg-1)   
-          datatimep = all_data_times(np1+file%cyc_ndx_beg-1) 
+          datatimem = all_data_times(n  +file%cyc_ndx_beg-1)
+          datatimep = all_data_times(np1+file%cyc_ndx_beg-1)
           times_found = .true.
+
+          if (masterproc) then
+             write(iulog,*) 'In find_times', datatimem,datatimep
+          endif
 
        endif
     endif
@@ -1088,12 +1292,11 @@ contains
     if ( .not. times_found ) then
        if (masterproc) then
           write(iulog,*)'FIND_TIMES: Failed to find dates bracketing desired time =', time
+          write(iulog,*) 'filename = '//trim(file%curr_filename)
           write(iulog,*)' datatimem = ',file%datatimem
           write(iulog,*)' datatimep = ',file%datatimep
-          write(iulog,*)' all_data_times = ',all_data_times
-          !call endrun()
-          return
        endif
+       return
     endif
 
     deallocate( all_data_times, stat=astat )
@@ -1101,7 +1304,7 @@ contains
        write(iulog,*) 'find_times: failed to deallocate all_data_times array; error = ',astat
        call endrun
     end if
-  
+
     if ( .not. file%cyclical ) then
       itms(1) = n
       itms(2) = np1
@@ -1113,8 +1316,8 @@ contains
     fids(:) = file%curr_fileid
 
     do i=1,2
-       if ( itms(i) > curr_tsize ) then 
-          itms(i) = itms(i) - curr_tsize 
+       if ( itms(i) > curr_tsize ) then
+          itms(i) = itms(i) - curr_tsize
           fids(i) = file%next_fileid
        endif
     enddo
@@ -1123,87 +1326,41 @@ contains
 
 !------------------------------------------------------------------------
 !------------------------------------------------------------------------
-  subroutine read_next_trcdata(state, flds, file )
-    
-    use shr_const_mod, only:pi => shr_const_pi
-    use physics_types,only : physics_state
-    use ppgrid,           only: pcols, pver, pverp,begchunk,endchunk
-    use physconst,        only: rair
-    use iop_data_mod
-    use rad_constituents, only: rad_cnst_get_info, rad_cnst_get_aer_props, &
-                            rad_cnst_get_mode_props, rad_cnst_get_mode_num
-    
+  subroutine read_next_trcdata( flds, file )
     implicit none
 
     type (trfile), intent(inout) :: file
     type (trfld),intent(inout) :: flds(:)
-    type(physics_state), intent(in)    :: state(begchunk:endchunk)
-    
-    integer :: recnos(4),i,f,nflds      ! 
+
+    integer :: recnos(4),i,f,nflds      !
     integer :: cnt4(4)            ! array of counts for each dimension
     integer :: strt4(4)           ! array of starting indices
     integer :: cnt3(3)            ! array of counts for each dimension
     integer :: strt3(3)           ! array of starting indices
     type(file_desc_t) :: fids(4)
-    logical :: times_found 
+    logical :: times_found
 
     integer :: cur_yr, cur_mon, cur_day, cur_sec, yr1, yr2, mon, date, sec
     real(r8) :: series1_time, series2_time
     type(file_desc_t) :: fid1, fid2
-   
-    integer :: nspec,nmodes,n,ii,kk,l1,k,lchnk
-    real(r8) :: profile_p(pver),pp(pver),meanP,meanO,sumii,volfrac,specdens,aero_den(6)
-    real(r8) :: q_a(3,6)
-    real(r8) :: rho(pcols,pver)        ! air density (kg m-3)
-    character(len=20) :: aername
-    character(len=3) :: arnam(7) = (/'so4','pom','soa','bc ','dst','ncl','num'/)
 
     nflds = size(flds)
     times_found = .false.
 
-    if(single_column .and. scm_observed_aero) then
-
-      call ver_profile_aero(pp)
-      ! The following do loop gets the species properties and calculates the aerosol
-      ! mass mixing ratio of each species from observed total number and size distribution
-      ! properties in the unit kg/m^3 for the 3 modes. Data is read from the forcing file.
-      ! For mode 1 (accumulation mode) q_a(1,1)=q(so4),q_a(1,2)=q(pom),q_a(1,3)=q(soa),
-      ! q_a(1,4)=q(bc),q_a(1,5)=q(dst),q_a(1,6)=q(ncl).
-      ! For mode 2 (aitken mode) q_a(2,1)=q(so4),q_a(2,2)=q(soa),q_a(2,3)=q(ncl).
-      ! For mode 3 (coarse mode) q_a(3,1)=q(dst),q_a(3,2)=q(ncl),q_a(3,3)=q(so4).
-
-      call rad_cnst_get_info(0, nmodes=nmodes)
-      do n=1, nmodes
-        call rad_cnst_get_info(0, n, nspec=nspec)
-        do l1 = 1, nspec
-          call rad_cnst_get_aer_props(0, n,l1,density_aer=specdens)
-          call rad_cnst_get_aer_props(0, n, l1, aername=aername)
-          aero_den(l1)=specdens
-          q_a(n,l1) = specdens*scm_div(n,l1)*scm_num(n)*((pi/6.0_r8)*( &
-                      scm_dgnum(n)**3)*exp(4.5_r8*(log(scm_std(n))**2) )) 
-        enddo
-      enddo
-      
-      do k = 1, pver
-        do ii = 1, state(begchunk)%ncol
-          rho(ii,k) = state(begchunk)%pmid(ii,k)/(rair*state(begchunk)%t(ii,k))
-        enddo
-      enddo
-    end if
-
-    do while( .not. times_found )
-      call find_times( recnos, fids, file%curr_mod_time,file,file%datatimem,file%datatimep, times_found )
-      if ( .not. times_found ) then
-        call check_files( file, fids, recnos, times_found )
-      endif
-    enddo
-
-    ! If single column do not interpolate aerosol data, just use the step function. 
-    !   The exception is if we are trying to "replay" a column from the full model
-    if(single_column .and. .not. use_replay) then
-      file%stepTime = .true.
+    if (masterproc) then
+       write(iulog,*) 'find_times: ',file%curr_mod_time, file%datatimem, file%datatimep, times_found
     endif
 
+    do while( .not. times_found )
+       call find_times( recnos, fids, file%curr_mod_time, file,file%datatimem, file%datatimep, times_found )
+       if ( .not. times_found ) then
+          call check_files( file, fids, recnos, times_found )
+       endif
+    enddo
+
+    !--------------------------------------------------------------
+    !       If stepTime, then no time interpolation is to be done
+    !--------------------------------------------------------------
     if (file%stepTime) then
        file%interp_recs = 1
     else
@@ -1247,9 +1404,9 @@ contains
           call set_date_from_time_float( file%datatimes(1), yr1, mon, date, sec )
           call set_time_float_from_date( file%datatimem, cur_yr,  mon, date, sec )
           if (file%datatimes(1) > file%datatimes(2) ) then ! wrap around
-            if ( cur_mon == 1 ) then 
+            if ( cur_mon == 1 ) then
                call set_time_float_from_date( file%datatimem, cur_yr-1,  mon, date, sec )
-            endif 
+            endif
           endif
 
           call set_date_from_time_float( file%datatimes(2), yr1, mon, date, sec )
@@ -1257,7 +1414,7 @@ contains
           if (file%datatimes(1) > file%datatimes(2) ) then ! wrap around
             if ( cur_mon == 12 ) then
               call set_time_float_from_date( file%datatimep, cur_yr+1,  mon, date, sec )
-            endif 
+            endif
           endif
 
        endif
@@ -1267,234 +1424,93 @@ contains
     !
     ! Set up hyperslab corners
     !
-    strt4(:) = 1
-    strt3(:) = 1
 
     do i=1,file%interp_recs
 
+       strt4(:) = 1
+       strt3(:) = 1
+
        do f = 1,nflds
           if ( file%zonal_ave ) then
-                ! Defend against zonal mean surface fields that do not set the value via dimension match
-                if (flds(f)%coords(ZA_LATDIM) .gt. 0) cnt3(flds(f)%coords(ZA_LATDIM)) = file%nlat
+             cnt3(flds(f)%coords(ZA_LATDIM)) = file%nlat
              if (flds(f)%srf_fld) then
-                ! Defend against zonal mean surface fields that do not set the value via dimension match
-                if (flds(f)%coords(ZA_LEVDIM) .gt. 0) cnt3(flds(f)%coords(ZA_LEVDIM)) = 1
+                cnt3(flds(f)%coords(ZA_LEVDIM)) = 1
              else
                 cnt3(flds(f)%coords(ZA_LEVDIM)) = file%nlev
              endif
              cnt3(flds(f)%coords(ZA_TIMDIM)) = 1
              strt3(flds(f)%coords(ZA_TIMDIM)) = recnos(i)
-             !!
-             if (file%linoz_v3 .or. file%linoz_v2) then
-                     !!check if these are the surface variables
-                     !!no need to do interpolate since only used
-                     !!in preprocessing,
-                     !!clim +57 is the correspondent srf variable
-                     if (index(flds(f)%fldnam,"_clim")  .gt.0.and.&
-                         index(flds(f)%fldnam,"P_clim") .le.0.and.&
-                         index(flds(f)%fldnam,"L_clim") .le.0.and.&
-                         index(flds(f)%fldnam,"_srf")   .le.0)then
-                             call read_za_trc_linoz( fids(i), flds(f)%var_id, flds(f)%input(i)%data, strt3, cnt3, file, &
-                                                                (/ flds(f)%order(ZA_LATDIM),flds(f)%order(ZA_LEVDIM)/), &
-                                                                vid_srf=flds(f+57)%var_id )
-                     elseif (index(flds(f)%fldnam,"_srf").gt.0) then
-                             if (index(flds(f)%fldnam,"ch4_avg_srf").gt.0) then
-                                      cnt3(1)=1!set 1st dim since no ZA_LATDIM
-                             endif
-                             call read_zasrf_trc_linoz(fids(i), flds(f)%var_id, flds(f)%input(i)%data, strt3, cnt3, file)
-                     else
-                             call read_za_trc_linoz( fids(i), flds(f)%var_id, flds(f)%input(i)%data, strt3, cnt3, file, &
-                                                                (/ flds(f)%order(ZA_LATDIM),flds(f)%order(ZA_LEVDIM) /) )
-                     endif
-             else
-                             call read_za_trc( fids(i), flds(f)%var_id, flds(f)%input(i)%data, strt3, cnt3, file, &
-                                                          (/ flds(f)%order(ZA_LATDIM),flds(f)%order(ZA_LEVDIM) /) )
-             endif
+             call read_za_trc( fids(i), flds(f)%var_id, flds(f)%input(i)%data, strt3, cnt3, file, &
+                  (/ flds(f)%order(ZA_LATDIM),flds(f)%order(ZA_LEVDIM) /) )
           else if ( flds(f)%srf_fld ) then
-             cnt3( flds(f)%coords(LONDIM)) = file%nlon
-             cnt3( flds(f)%coords(LATDIM)) = file%nlat
-             cnt3( flds(f)%coords(PS_TIMDIM)) = 1
-             strt3(flds(f)%coords(PS_TIMDIM)) = recnos(i)
-             call read_2d_trc( fids(i), flds(f)%var_id, flds(f)%input(i)%data(:,1,:), strt3, cnt3, file, &
-                 (/ flds(f)%order(LONDIM),flds(f)%order(LATDIM) /) )
+             if ( file%unstructured ) then
+                ! read data directly onto the unstructureed phys grid -- assumes input data is on same grid as phys
+                call read_physgrid_2d( fids(i), flds(f)%fldnam,  recnos(i), flds(f)%input(i)%data(:,1,:) )
+             else
+                cnt3( flds(f)%coords(LONDIM)) = file%nlon
+                cnt3( flds(f)%coords(LATDIM)) = file%nlat
+                cnt3( flds(f)%coords(PS_TIMDIM)) = 1
+                strt3(flds(f)%coords(PS_TIMDIM)) = recnos(i)
+                call read_2d_trc( fids(i), flds(f)%var_id, flds(f)%input(i)%data(:,1,:), strt3, cnt3, file, &
+                     (/ flds(f)%order(LONDIM),flds(f)%order(LATDIM) /) )
+             endif
           else
-             cnt4(flds(f)%coords(LONDIM)) = file%nlon
-             cnt4(flds(f)%coords(LATDIM)) = file%nlat
-             cnt4(flds(f)%coords(LEVDIM)) = file%nlev
-             cnt4(flds(f)%coords(TIMDIM)) = 1
-             strt4(flds(f)%coords(TIMDIM)) = recnos(i)
-             call read_3d_trc( fids(i), flds(f)%var_id, flds(f)%input(i)%data, strt4, cnt4, file, &
-                  (/ flds(f)%order(LONDIM),flds(f)%order(LATDIM),flds(f)%order(LEVDIM) /))
+             if ( file%unstructured ) then
+                ! read data directly onto the unstructureed phys grid -- assumes input data is on same grid as phys
+                if ( file%alt_data ) then
+                   call read_physgrid_3d( fids(i), flds(f)%fldnam, 'altitude', file%nlev, recnos(i), flds(f)%input(i)%data(:,:,:) )
+                else
+                   call read_physgrid_3d( fids(i), flds(f)%fldnam, 'lev', file%nlev, recnos(i), flds(f)%input(i)%data(:,:,:) )
+                end if
+             else
+                cnt4(flds(f)%coords(LONDIM)) = file%nlon
+                cnt4(flds(f)%coords(LATDIM)) = file%nlat
+                cnt4(flds(f)%coords(LEVDIM)) = file%nlev
+                cnt4(flds(f)%coords(TIMDIM)) = 1
+                strt4(flds(f)%coords(TIMDIM)) = recnos(i)
+                call read_3d_trc( fids(i), flds(f)%var_id, flds(f)%input(i)%data, strt4, cnt4, file, &
+                     (/ flds(f)%order(LONDIM),flds(f)%order(LATDIM),flds(f)%order(LEVDIM) /))
+             endif
 
-             !
-             ! This section sets the observed aersol mass and number mixing ratios in the
-             ! appropriate variables. The observed aerosol inforamtion is read from the
-             ! forcing file as total number and size distribution parameters. Then the total 
-             ! volume is calculated.Using the desnsity of each species, the mass is calculated. 
-             ! Finally the number is partition among the each species using the species fraction 
-             ! data read from the forcing file.  
-             !
-             if(single_column .and. scm_observed_aero) then
-                kk=index(trim(flds(f)%fldnam),'_')-1
-                if(index(trim(flds(f)%fldnam),'1') > 0 .and.index(trim(flds(f)%fldnam),'log') < 1) then
-                     if(flds(f)%fldnam(1:kk).eq.arnam(1).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(1),flds(f)%input(i)%data, &
-                                rho,pp,q_a(1,1),state(begchunk)%ncol)
-                     elseif(flds(f)%fldnam(1:kk).eq.arnam(2).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(2),flds(f)%input(i)%data, &
-                                rho,pp,q_a(1,2),state(begchunk)%ncol)
-                     elseif(flds(f)%fldnam(1:kk).eq.arnam(3).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(3),flds(f)%input(i)%data, &
-                               rho,pp,q_a(1,3),state(begchunk)%ncol)
-                    elseif(flds(f)%fldnam(1:kk).eq.arnam(4).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(4),flds(f)%input(i)%data, &
-                                rho,pp,q_a(1,4),state(begchunk)%ncol)
-                     elseif(flds(f)%fldnam(1:kk).eq.arnam(5).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(5),flds(f)%input(i)%data, &
-                                rho,pp,q_a(1,5),state(begchunk)%ncol)
-                     elseif(flds(f)%fldnam(1:kk).eq.arnam(6).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(6),flds(f)%input(i)%data, &
-                                rho,pp,q_a(1,6),state(begchunk)%ncol)
-                     elseif(flds(f)%fldnam(1:kk).eq.arnam(7).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(7),flds(f)%input(i)%data, &
-                                rho,pp,scm_num(1),state(begchunk)%ncol)
-                     endif
-                elseif(index(trim(flds(f)%fldnam),'2') > 0 .and.index(trim(flds(f)%fldnam),'log') < 1) then
-                     if(flds(f)%fldnam(1:kk).eq.arnam(1).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(1),flds(f)%input(i)%data, &
-                                rho,pp,q_a(2,1),state(begchunk)%ncol)
-                     elseif(flds(f)%fldnam(1:kk).eq.arnam(3).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(3),flds(f)%input(i)%data, &
-                               rho,pp,q_a(2,2),state(begchunk)%ncol)
-                     elseif(flds(f)%fldnam(1:kk).eq.arnam(6).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(6),flds(f)%input(i)%data, &
-                                rho,pp,q_a(2,3),state(begchunk)%ncol)
-                     elseif(flds(f)%fldnam(1:kk).eq.arnam(7).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(7),flds(f)%input(i)%data, &
-                                rho,pp,scm_num(2),state(begchunk)%ncol)
-                     endif
-                elseif(index(trim(flds(f)%fldnam),'3') > 0 .and.index(trim(flds(f)%fldnam),'log') < 1) then
-                     if(flds(f)%fldnam(1:kk).eq.arnam(1).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(1),flds(f)%input(i)%data, &
-                                rho,pp,q_a(3,3),state(begchunk)%ncol)
-                     elseif(flds(f)%fldnam(1:kk).eq.arnam(5).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(5),flds(f)%input(i)%data, &
-                                rho,pp,q_a(3,1),state(begchunk)%ncol)
-                     elseif(flds(f)%fldnam(1:kk).eq.arnam(6).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(6),flds(f)%input(i)%data, &
-                                rho,pp,q_a(3,2),state(begchunk)%ncol)
-                     elseif(flds(f)%fldnam(1:kk).eq.arnam(7).and.index(trim(flds(f)%fldnam),'log') < 1) then
-                           call replace_aero_data(flds(f)%fldnam,arnam(7),flds(f)%input(i)%data, &
-                                rho,pp,scm_num(3),state(begchunk)%ncol)
-                     endif
-                endif 
-             endif !scm_observed_aero
           endif
 
        enddo
 
        if ( file%has_ps ) then
-          cnt3(file%ps_coords(LONDIM)) = file%nlon
-          cnt3(file%ps_coords(LATDIM)) = file%nlat
-          cnt3(file%ps_coords(PS_TIMDIM)) = 1
-          strt3(file%ps_coords(PS_TIMDIM)) = recnos(i)
-          call read_2d_trc( fids(i), file%ps_id, file%ps_in(i)%data, strt3, cnt3, file, &
-               (/ file%ps_order(LONDIM),file%ps_order(LATDIM) /) )
+          if ( file%unstructured ) then
+             call read_physgrid_2d( fids(i), 'PS',  recnos(i), file%ps_in(i)%data )
+          else
+             cnt3 = 1
+             strt3 = 1
+             if (.not. file%zonal_ave) then
+                cnt3(file%ps_coords(LONDIM)) = file%nlon
+             end if
+             cnt3(file%ps_coords(LATDIM)) = file%nlat
+             cnt3(file%ps_coords(PS_TIMDIM)) = 1
+             strt3(file%ps_coords(PS_TIMDIM)) = recnos(i)
+             if (file%zonal_ave) then
+                call read_2d_trc( fids(i), file%ps_id, file%ps_in(i)%data, strt3(1:2), cnt3(1:2), file, &
+                     (/ 1, 2 /) )
+             else
+                call read_2d_trc( fids(i), file%ps_id, file%ps_in(i)%data, strt3, cnt3, file, &
+                     (/ file%ps_order(LONDIM),file%ps_order(LATDIM) /) )
+             end if
+          end if
        endif
 
     enddo
 
   end subroutine read_next_trcdata
 
-!--------------------------------------------------------------------------------
-!This subroutine replaces the climatological aerosol information by the observed
-!once after they are read
-!
-   subroutine   replace_aero_data(aerofulnam,spnam,aero_q_data,rho,pp,q_mix,ncoli)
-         use ppgrid,           only:  pcols,pver,begchunk,endchunk
-         
-         implicit none
-         real(r8), intent(inout) :: aero_q_data(pcols,pver,begchunk:endchunk)
-         real(r8), intent(in) :: rho(pcols,pver),pp(pver) 
-         real(r8) :: sumii,meanO
-         real(r8), intent(in) :: q_mix
-         character(len=32),intent(in) ::aerofulnam
-         character(len=3),intent(in) :: spnam
-         character(len=32) ::aerosubnam
-         integer, intent(in) :: ncoli 
-         integer :: ii,k,countj
-               
-                if(trim(aerofulnam(1:2)).eq.'bc') then
-                  aerosubnam=aerofulnam(1:4)
-                else
-                  aerosubnam=aerofulnam(1:5)
-                endif
-           
-           if((trim(aerosubnam).eq.(trim(spnam)//'_a').or.trim(aerosubnam).eq.(trim(spnam)//'_c')) &
-               .and.index(trim(aerofulnam),'log') < 1) then
-
-                     aero_q_data=q_mix
-                   sumii=0._r8
-                   countj =0
-                  do ii = 1, ncoli
-                    do k = 1, pver
-                      if(pp(k).gt.0._r8) then
-                        countj=countj+1
-                      endif
-                      if(trim(spnam).ne.'num') then
-                          aero_q_data(ii,k,begchunk)=(aero_q_data(ii,k,begchunk)*pp(k)) /rho(ii,k)
-                      endif
-                         sumii=sumii + aero_q_data(ii,k,begchunk)
-                    enddo
-                  enddo
-                   meanO=sumii/countj
-                  do k = 1, pver
-                    if(meanO.ne.0.) then
-                          aero_q_data(1,k,begchunk)=pp(k)*meanO
-                     else                 
-                        aero_q_data(1,k,begchunk)=0._r8
-                    endif
-                  enddo
-              endif
-
-   end subroutine replace_aero_data
-   
-!---------------------------------------------------------------------------
-!This subroutine generates a heavyside type profiles for the observed aerosol.
-!This setting is constant profile in the lower atmosphere and then exponentially 
-!decreasing to zero at the top of the atmosphere. The level of initial decay is 
-!controlled by "initial_val". Larger than -3.5 pushes the decay point up and smaller 
-!brings it closer to the surface.
-!   
-   subroutine ver_profile_aero(vertprof_aero)
-              use mo_constants, only : pi
-              use ppgrid,       only:  pcols,pver
-         
-         implicit none
-         real(r8), intent(inout) :: vertprof_aero(pver)
-         real(r8) :: initial_val = -3.5_r8
-         integer :: k
-            
-         do k=1,pver
-           if(k==1) then
-             vertprof_aero(k)=0._r8
-           elseif(k==2) then
-             vertprof_aero(k)=1._r8/(1._r8 + exp(-2._r8*initial_val * pi)) 
-           else
-             vertprof_aero(k)=1._r8/(1._r8 + exp(-2._r8*(initial_val * pi + pi/4._r8*(k-2)))) 
-           endif
-         enddo 
-   end subroutine ver_profile_aero
-
 !------------------------------------------------------------------------
-
 
   subroutine read_2d_trc( fid, vid, loc_arr, strt, cnt, file, order )
     use interpolate_data,  only : lininterp_init, lininterp, interp_type, lininterp_finish
 
-    use phys_grid,    only : pcols, begchunk, endchunk, get_ncols_p, get_rlat_all_p, get_rlon_all_p, get_lon_all_p, get_lat_all_p 
-    use mo_constants, only : pi
-    use dycore,       only: dycore_is		
+    use ppgrid,       only: pcols, begchunk, endchunk
+    use phys_grid,    only: get_ncols_p, get_rlat_all_p, get_rlon_all_p
+    use mo_constants, only: pi
+    use dycore,       only: dycore_is
     use polar_avg,    only: polar_average
     use horizontal_interpolate, only : xy_interp
 
@@ -1505,14 +1521,15 @@ contains
     real(r8),intent(out)  :: loc_arr(:,:)
     type (trfile), intent(in) :: file
 
-    real(r8) :: to_lats(pcols), to_lons(pcols), wrk(pcols)
+    real(r8) :: to_lats(pcols), to_lons(pcols)
     real(r8), allocatable, target :: wrk2d(:,:)
     real(r8), pointer :: wrk2d_in(:,:)
 
-    integer :: tsize, c, i, j, ierr, ncols
+    integer :: c, ierr, ncols
     real(r8), parameter :: zero=0_r8, twopi=2_r8*pi
-    type(interp_type) :: lon_wgts, lat_wgts    
+    type(interp_type) :: lon_wgts, lat_wgts
     integer :: lons(pcols), lats(pcols)
+    real(r8) :: file_lats(file%nlat)
 
      nullify(wrk2d_in)
      allocate( wrk2d(cnt(1),cnt(2)), stat=ierr )
@@ -1530,7 +1547,6 @@ contains
      end if
 
 
-
     ierr = pio_get_var( fid, vid, strt, cnt, wrk2d )
     if(associated(wrk2d_in)) then
        wrk2d_in = reshape( wrk2d(:,:),(/file%nlon,file%nlat/), order=order )
@@ -1539,40 +1555,59 @@ contains
        wrk2d_in => wrk2d
     end if
 
-    j=1
+    ! PGI 13.9 bug workaround.
+    file_lats = file%lats
 
-! if weighting by latitude, the perform horizontal interpolation by using weight_x, weight_y
+    ! For zonal average, only interpolate along latitude.
+    if (file%zonal_ave) then
 
-   if(file%weight_by_lat) then
+       do c=begchunk,endchunk
+          ncols = get_ncols_p(c)
+          call get_rlat_all_p(c, pcols, to_lats)
 
-      call t_startf('xy_interp')
+          call lininterp_init(file_lats, file%nlat, to_lats, ncols, 1, lat_wgts)
 
-      do c = begchunk,endchunk
-        ncols = get_ncols_p(c)
-        call get_lon_all_p(c,ncols,lons)
-        call get_lat_all_p(c,ncols,lats)
+          call lininterp(wrk2d_in(1,:), file%nlat, loc_arr(1:ncols,c-begchunk+1), ncols, lat_wgts)
 
-        call xy_interp(file%nlon,file%nlat,1,plon,plat,pcols,ncols,file%weight_x,file%weight_y,wrk2d_in,loc_arr(:,c-begchunk+1),  &
-                            lons,lats,file%count_x,file%count_y,file%index_x,file%index_y) 
-      enddo
-
-      call t_stopf('xy_interp')
+          call lininterp_finish(lat_wgts)
+       end do
 
     else
-      do c=begchunk,endchunk
-        ncols = get_ncols_p(c)
-        call get_rlat_all_p(c, pcols, to_lats)
-        call get_rlon_all_p(c, pcols, to_lons)
+       ! if weighting by latitude, the perform horizontal interpolation by using weight_x, weight_y
 
-        call lininterp_init(file%lons, file%nlon, to_lons, ncols, 2, lon_wgts, zero, twopi)
-        call lininterp_init(file%lats, file%nlat, to_lats, ncols, 1, lat_wgts)
+       if(file%weight_by_lat) then
 
-        call lininterp(wrk2d_in, file%nlon, file%nlat, loc_arr(1:ncols,c-begchunk+1), ncols, lon_wgts, lat_wgts)    
-       
-        call lininterp_finish(lon_wgts)
-        call lininterp_finish(lat_wgts)
-      end do
-    endif
+          call t_startf('xy_interp')
+
+          do c = begchunk,endchunk
+             ncols = get_ncols_p(c)
+             lons(:ncols) = lon_global_grid_ndx(:ncols,c)
+             lats(:ncols) = lat_global_grid_ndx(:ncols,c)
+
+             call xy_interp(file%nlon,file%nlat,1,plon,plat,pcols,ncols, &
+                  file%weight_x,file%weight_y,wrk2d_in,loc_arr(:,c-begchunk+1), &
+                  lons,lats,file%count_x,file%count_y,file%index_x,file%index_y)
+          enddo
+
+          call t_stopf('xy_interp')
+
+       else
+          do c=begchunk,endchunk
+             ncols = get_ncols_p(c)
+             call get_rlat_all_p(c, pcols, to_lats)
+             call get_rlon_all_p(c, pcols, to_lons)
+
+             call lininterp_init(file%lons, file%nlon, to_lons, ncols, 2, lon_wgts, zero, twopi)
+             call lininterp_init(file%lats, file%nlat, to_lats, ncols, 1, lat_wgts)
+
+             call lininterp(wrk2d_in, file%nlon, file%nlat, loc_arr(1:ncols,c-begchunk+1), ncols, lon_wgts, lat_wgts)
+
+             call lininterp_finish(lon_wgts)
+             call lininterp_finish(lat_wgts)
+          end do
+       endif
+
+    end if
 
     if(allocated(wrk2d)) then
        deallocate(wrk2d)
@@ -1586,10 +1621,8 @@ contains
 
   subroutine read_za_trc( fid, vid, loc_arr, strt, cnt, file, order )
     use interpolate_data, only : lininterp_init, lininterp, interp_type, lininterp_finish
-    use phys_grid,        only : pcols, begchunk, endchunk, get_ncols_p, get_rlat_all_p, get_rlon_all_p	
-    use mo_constants,     only : pi
-    use dycore,           only : dycore_is		
-    use polar_avg,        only : polar_average
+    use ppgrid,           only : pcols, begchunk, endchunk
+    use phys_grid,        only : get_ncols_p, get_rlat_all_p
 
     implicit none
     type(file_desc_t), intent(in) :: fid
@@ -1600,7 +1633,7 @@ contains
     type (trfile),     intent(in) :: file
 
     type(interp_type) :: lat_wgts
-    real(r8) :: to_lats(pcols), to_lons(pcols), wrk(pcols)
+    real(r8) :: to_lats(pcols), wrk(pcols)
     real(r8), allocatable, target :: wrk2d(:,:)
     real(r8), pointer :: wrk2d_in(:,:)
     integer :: c, k, ierr, ncols
@@ -1629,111 +1662,10 @@ contains
        wrk2d_in => wrk2d
     end if
 
-
-
     do c=begchunk,endchunk
        ncols = get_ncols_p(c)
        call get_rlat_all_p(c, pcols, to_lats)
 
-       call lininterp_init(file%lats, file%nlat, to_lats, ncols, 1, lat_wgts)
-       do k=1,file%nlev
-          call lininterp(wrk2d_in(:,k), file%nlat, wrk(1:ncols), ncols, lat_wgts)    
-          loc_arr(1:ncols,k,c-begchunk+1) = wrk(1:ncols)
-       end do
-       call lininterp_finish(lat_wgts)
-    end do
-
-    if(allocated(wrk2d)) then
-       deallocate(wrk2d)
-    else
-       deallocate(wrk2d_in)
-    end if
-!    if(dycore_is('LR')) call polar_average(loc_arr)
-  end subroutine read_za_trc
-!------------------------------------------------------------------------
-  subroutine read_za_trc_linoz( fid, vid, loc_arr, strt, cnt, file, order ,vid_srf)
-    use interpolate_data, only : lininterp_init, lininterp, interp_type, lininterp_finish
-    use phys_grid,        only : pcols, begchunk, endchunk, get_ncols_p, get_rlat_all_p, get_rlon_all_p 
-    use mo_constants,     only : pi
-    use dycore,           only : dycore_is              
-    use polar_avg,        only : polar_average
-
-    implicit none
-    type(file_desc_t), intent(in) :: fid
-    type(var_desc_t),  intent(in) :: vid
-    integer,           intent(in) :: strt(:), cnt(:)
-    integer,           intent(in) :: order(2)
-    real(r8),          intent(out):: loc_arr(:,:,:)
-    type (trfile),     intent(in) :: file
-    !!
-    type(var_desc_t),  intent(in), optional :: vid_srf
-    integer :: cnt_srf(2)
-    integer :: strt_srf(2)
-    !!
-    type(interp_type) :: lat_wgts
-    real(r8) :: to_lats(pcols), to_lons(pcols), wrk(pcols)
-    real(r8), allocatable, target :: wrk2d(:,:)
-    real(r8), allocatable, target :: wrksrf(:)
-    real(r8), pointer :: wrk2d_in(:,:)
-    integer :: c, k, ierr, ncols
-
-     nullify(wrk2d_in)
-     allocate( wrk2d(cnt(1),cnt(2)), stat=ierr )
-     if( ierr /= 0 ) then
-        write(iulog,*) 'read_2d_trc: wrk2d allocation error = ',ierr
-        call endrun
-     end if
-
-     if(order(1)/=1 .or. order(2)/=2 .or. cnt(1)/=file%nlat .or. cnt(2)/=file%nlev) then
-        allocate( wrk2d_in(file%nlat, file%nlev), stat=ierr )
-        if( ierr /= 0 ) then
-           write(iulog,*) 'read_2d_trc: wrk2d_in allocation error = ',ierr
-           call endrun
-        end if
-     end if
-    !!
-    ierr = pio_get_var( fid, vid, strt, cnt, wrk2d )
-    !!
-    if (file%linoz_v3) then
-            !!since io reads in global data for every thread
-            !!and interpolate to local chunk, we can do surface,
-            !!polar, and surface padding preprocessfor every variable 
-            !!before interpolation
-            !!it is put here rather than the data formation process
-            !!to prevent forget when producing forcing data
-                !read in order of 0.1hPa~985hPa, pad top with 2nd layer
-                wrk2d(:,1)=wrk2d(:,2)
-                !both N/S poles need to pad by nearest data
-                wrk2d(1,:)=wrk2d(2,:)
-                wrk2d(file%nlat,:)=wrk2d(file%nlat-1,:)
-                !!read in srf data to pad surface
-                !!they are inputs from CMIP forcing and other references
-                cnt_srf(1)=cnt(1)
-                cnt_srf(2)=cnt(3)
-                strt_srf(1)=strt(1)
-                strt_srf(2)=strt(3)
-                !!check if vid_srf is present to determine clim variables
-                if (present(vid_srf)) then
-                !!padding for clim terms
-                allocate(wrksrf(cnt(1)), stat=ierr )
-                ierr = pio_get_var( fid, vid_srf, strt_srf, cnt_srf, wrksrf )
-                !!surface padding
-                wrk2d(:,file%nlev)=wrksrf
-                deallocate(wrksrf)
-                endif
-                !!
-    endif
-    !!
-    if(associated(wrk2d_in)) then
-       wrk2d_in = reshape( wrk2d(:,:),(/file%nlat,file%nlev/), order=order )
-       deallocate(wrk2d)
-    else
-       wrk2d_in => wrk2d
-    end if
-
-    do c=begchunk,endchunk
-       ncols = get_ncols_p(c)
-       call get_rlat_all_p(c, pcols, to_lats)
        call lininterp_init(file%lats, file%nlat, to_lats, ncols, 1, lat_wgts)
        do k=1,file%nlev
           call lininterp(wrk2d_in(:,k), file%nlat, wrk(1:ncols), ncols, lat_wgts)
@@ -1747,94 +1679,82 @@ contains
     else
        deallocate(wrk2d_in)
     end if
-    !!
-    if(allocated(wrksrf)) then
-       deallocate(wrksrf)
-    end if
-!    if(dycore_is('LR')) call polar_average(loc_arr)
-  end subroutine read_za_trc_linoz
+  end subroutine read_za_trc
 
 !------------------------------------------------------------------------
-  subroutine read_zasrf_trc_linoz( fid, vid, loc_arr, strt, cnt, file)
-    use interpolate_data, only : lininterp_init, lininterp, interp_type, lininterp_finish
-    use phys_grid,        only : pcols, begchunk, endchunk, get_ncols_p, get_rlat_all_p, get_rlon_all_p
-    !!
-    implicit none
-    type(file_desc_t), intent(in) :: fid
-    type(var_desc_t),  intent(in) :: vid
-    integer,           intent(in) :: strt(:), cnt(:)
-    real(r8),          intent(out):: loc_arr(:,:,:)
-    type (trfile),     intent(in) :: file
-    !!
-    real(r8), allocatable, target :: wrk(:)
-    real(r8), pointer :: wrk_in(:)
-    real(r8) :: wrk_out(pcols)
-    type(interp_type) :: lat_wgts
-    real(r8) :: to_lats(pcols), to_lons(pcols)
-    integer :: c, k, ierr, ncols
-    integer :: cnt_srf(2)
-    integer :: strt_srf(2)
-    !!
-    nullify(wrk_in)
-    allocate( wrk(cnt(1)), stat=ierr )
-    if( ierr /= 0 ) then
-       write(iulog,*) 'read_zasrf_trc_linoz: wrk allocation error = ',ierr
-       call endrun
+! this assumes the input data is gridded to match the physics grid
+  subroutine read_physgrid_2d(ncid, varname, recno, data )
+
+    use ncdio_atm,        only: infld
+    use cam_grid_support, only: cam_grid_check, cam_grid_id, cam_grid_get_dim_names
+
+    type(file_desc_t) :: ncid
+    character(len=*), intent(in) :: varname
+    integer, intent(in) :: recno
+    real(r8), intent(out) :: data(1:pcols,begchunk:endchunk)
+
+    logical :: found
+    character(len=8) :: dim1name, dim2name
+    integer :: grid_id  ! grid ID for data mapping
+
+    grid_id = cam_grid_id('physgrid')
+    if (.not. cam_grid_check(grid_id)) then
+      call endrun('tracer_data::read_physgrid_2d: Internal error, no "physgrid" grid')
     end if
-    !!
-    cnt_srf(1)=cnt(1)
-    cnt_srf(2)=cnt(3)
-    strt_srf(1)=strt(1)
-    strt_srf(2)=strt(3)
-    !!
-    !for surface variable with the dimension of (time,lat) or (time,1)
-    !for (time) it is also set like (time,1)
-        ierr = pio_get_var( fid, vid, strt_srf, cnt_srf, wrk )
-        !!
-        if(associated(wrk_in)) then
-                wrk_in = reshape( wrk(:),(/file%nlat/))
-                deallocate(wrk)
-        else
-                wrk_in => wrk
-        end if
-        !!
-        do c=begchunk,endchunk
-           ncols = get_ncols_p(c)
-           call get_rlat_all_p(c, pcols, to_lats)
-           call lininterp_init(file%lats, file%nlat, to_lats, ncols, 1, lat_wgts)
-           !!
-           if (cnt(1).eq.1) then!!for single timeseries
-                do k=1,1
-                loc_arr(1:ncols,k,c-begchunk+1) = wrk_in(1)
-                end do
-           else
-                do k=1,1
-                call lininterp(wrk_in(:), file%nlat, wrk_out(1:ncols), ncols, lat_wgts)
-                loc_arr(1:ncols,k,c-begchunk+1) = wrk_out(1:ncols)
-                end do
-           end if
-           !!
-           call lininterp_finish(lat_wgts)
-        end do
-    !!
-    if(allocated(wrk)) then
-       deallocate(wrk)
-    else
-       deallocate(wrk_in)
+    call cam_grid_get_dim_names(grid_id, dim1name, dim2name)
+
+    call infld( varname, ncid, dim1name, dim2name, 1, pcols, begchunk, endchunk, &
+                data, found, gridname='physgrid', timelevel=recno )
+
+    if(.not. found) then
+       call endrun('tracer_data::read_physgrid_2d: Could not find '//trim(varname)//' field in input datafile')
     end if
-    !!
-    end subroutine read_zasrf_trc_linoz
+
+  end subroutine read_physgrid_2d
 
 !------------------------------------------------------------------------
+!------------------------------------------------------------------------
+! this assumes the input data is gridded to match the physics grid
+  subroutine read_physgrid_3d(ncid, varname, vrt_coord_name, nlevs, recno, data )
+
+    use ncdio_atm,        only: infld
+    use cam_grid_support, only: cam_grid_check, cam_grid_id, cam_grid_get_dim_names
+
+    type(file_desc_t) :: ncid
+    character(len=*), intent(in) :: varname
+    character(len=*), intent(in) :: vrt_coord_name
+    integer, intent(in) :: nlevs
+    integer, intent(in) :: recno
+    real(r8), intent(out) :: data(1:pcols,1:nlevs,begchunk:endchunk)
+
+    logical :: found
+    character(len=8) :: dim1name, dim2name
+    integer :: grid_id  ! grid ID for data mapping
+
+    grid_id = cam_grid_id('physgrid')
+    if (.not. cam_grid_check(grid_id)) then
+      call endrun('tracer_data::read_physgrid_3d: Internal error, no "physgrid" grid')
+    end if
+    call cam_grid_get_dim_names(grid_id, dim1name, dim2name)
+
+    call infld( varname, ncid, dim1name, vrt_coord_name, dim2name, 1, pcols, 1, nlevs, begchunk, endchunk, &
+                data, found, gridname='physgrid', timelevel=recno )
+
+    if(.not. found) then
+       call endrun('tracer_data::read_physgrid_3d: Could not find '//trim(varname)//' field in input datafile')
+    end if
+
+  end subroutine read_physgrid_3d
+
+  !------------------------------------------------------------------------
 
   subroutine read_3d_trc( fid, vid, loc_arr, strt, cnt, file, order)
     use interpolate_data, only : lininterp_init, lininterp, interp_type, lininterp_finish
-    use phys_grid,        only : pcols, begchunk, endchunk, get_ncols_p, get_rlat_all_p, get_rlon_all_p, get_lon_all_p,&
-                                 get_lat_all_p 
+    use ppgrid,           only : pcols, begchunk, endchunk
+    use phys_grid,        only : get_ncols_p, get_rlat_all_p, get_rlon_all_p
     use mo_constants,     only : pi
-    use dycore,           only : dycore_is		
+    use dycore,           only : dycore_is
     use polar_avg,        only : polar_average
-    use dycore,           only  : dycore_is
     use horizontal_interpolate, only : xy_interp
 
     implicit none
@@ -1843,20 +1763,19 @@ contains
     type(var_desc_t), intent(in) :: vid
     integer, intent(in) :: strt(:), cnt(:), order(3)
     real(r8),intent(out)  :: loc_arr(:,:,:)
-    
+
     type (trfile), intent(in) :: file
 
-    integer :: i,j,k, astat, c, ncols
+    integer :: astat, c, ncols
     integer :: lons(pcols), lats(pcols)
 
-    integer                     :: jlim(2), jl, ju, ierr
-    integer                     :: gndx
+    integer :: ierr
 
     real(r8), allocatable, target :: wrk3d(:,:,:)
     real(r8), pointer :: wrk3d_in(:,:,:)
     real(r8) :: to_lons(pcols), to_lats(pcols)
     real(r8), parameter :: zero=0_r8, twopi=2_r8*pi
-    type(interp_type) :: lon_wgts, lat_wgts    
+    type(interp_type) :: lon_wgts, lat_wgts
 
     loc_arr(:,:,:) = 0._r8
     nullify(wrk3d_in)
@@ -1881,23 +1800,32 @@ contains
        wrk3d_in => wrk3d
     end if
 
-    j=1
-
 ! If weighting by latitude, then perform horizontal interpolation by using weight_x, weight_y
 
    if(file%weight_by_lat) then
 
      call t_startf('xy_interp')
-
-     do c = begchunk,endchunk
+     if( file%dist ) then
+      do c = begchunk,endchunk
         ncols = get_ncols_p(c)
-        call get_lon_all_p(c,ncols,lons)
-        call get_lat_all_p(c,ncols,lats)
+        lons(:ncols) = lon_global_grid_ndx(:ncols,c)
+        lats(:ncols) = lat_global_grid_ndx(:ncols,c)
 
-        call xy_interp(file%nlon,file%nlat,file%nlev,plon,plat,pcols,ncols,file%weight_x,file%weight_y,wrk3d_in, &
-             loc_arr(:,:,c-begchunk+1), lons,lats,file%count_x,file%count_y,file%index_x,file%index_y) 
-     enddo
+        call xy_interp(file%nlon,file%nlat,file%nlev,plon,plat,pcols,ncols, &
+                       file%weight0_x,file%weight0_y,wrk3d_in,loc_arr(:,:,c-begchunk+1),  &
+                       lons,lats,file%count0_x,file%count0_y,file%index0_x,file%index0_y)
+      enddo
+     else
+      do c = begchunk,endchunk
+        ncols = get_ncols_p(c)
+        lons(:ncols) = lon_global_grid_ndx(:ncols,c)
+        lats(:ncols) = lat_global_grid_ndx(:ncols,c)
 
+        call xy_interp(file%nlon,file%nlat,file%nlev,plon,plat,pcols,ncols,&
+                       file%weight_x,file%weight_y,wrk3d_in,loc_arr(:,:,c-begchunk+1), &
+                       lons,lats,file%count_x,file%count_y,file%index_x,file%index_y)
+      enddo
+     endif
      call t_stopf('xy_interp')
 
    else
@@ -1910,7 +1838,7 @@ contains
        call lininterp_init(file%lats, file%nlat, to_lats(1:ncols), ncols, 1, lat_wgts)
 
 
-       call lininterp(wrk3d_in, file%nlon, file%nlat, file%nlev, loc_arr(:,:,c-begchunk+1), ncols, pcols, lon_wgts, lat_wgts)    	
+       call lininterp(wrk3d_in, file%nlon, file%nlat, file%nlev, loc_arr(:,:,c-begchunk+1), ncols, pcols, lon_wgts, lat_wgts)
 
 
        call lininterp_finish(lon_wgts)
@@ -1935,16 +1863,15 @@ contains
   subroutine interpolate_trcdata( state, flds, file, pbuf2d )
     use mo_util,      only : rebin
     use physics_types,only : physics_state
-    use physconst,    only : cday
-    use physics_buffer, only : physics_buffer_desc, pbuf_get_field
+    use physconst,    only : cday, rga
 
     implicit none
 
-    type(physics_state), intent(in) :: state(begchunk:endchunk)                 
+    type(physics_state), intent(in) :: state(begchunk:endchunk)
     type (trfld),        intent(inout) :: flds(:)
     type (trfile),       intent(inout) :: file
-    
-    type(physics_buffer_desc), optional, pointer :: pbuf2d(:,:)
+
+    type(physics_buffer_desc), pointer :: pbuf2d(:,:)
 
 
     real(r8) :: fact1, fact2
@@ -1953,13 +1880,12 @@ contains
     real(r8) :: ps(pcols)
     real(r8) :: datain(pcols,file%nlev)
     real(r8) :: pin(pcols,file%nlev)
-    real(r8) :: pint(pcols,file%nilev)
-
     real(r8)            :: model_z(pverp)
     real(r8), parameter :: m2km  = 1.e-3_r8
     real(r8), pointer :: data_out3d(:,:,:)
     real(r8), pointer :: data_out(:,:)
     integer :: chnk_offset
+    real(r8) :: data_col(pver)
 
     nflds = size(flds)
 
@@ -1971,10 +1897,10 @@ contains
        do c = begchunk,endchunk
           ncol = state(c)%ncol
           if ( file%has_ps ) then
-             file%ps_in(1)%data(:ncol,c) = fact1*file%ps_in(1)%data(:ncol,c) + fact2*file%ps_in(3)%data(:ncol,c) 
+             file%ps_in(1)%data(:ncol,c) = fact1*file%ps_in(1)%data(:ncol,c) + fact2*file%ps_in(3)%data(:ncol,c)
           endif
           do f = 1,nflds
-             flds(f)%input(1)%data(:ncol,:,c) = fact1*flds(f)%input(1)%data(:ncol,:,c) + fact2*flds(f)%input(3)%data(:ncol,:,c) 
+             flds(f)%input(1)%data(:ncol,:,c) = fact1*flds(f)%input(1)%data(:ncol,:,c) + fact2*flds(f)%input(3)%data(:ncol,:,c)
           enddo
        enddo
 
@@ -1986,10 +1912,10 @@ contains
        do c = begchunk,endchunk
           ncol = state(c)%ncol
           if ( file%has_ps ) then
-             file%ps_in(2)%data(:ncol,c) = fact1*file%ps_in(2)%data(:ncol,c) + fact2*file%ps_in(4)%data(:ncol,c) 
+             file%ps_in(2)%data(:ncol,c) = fact1*file%ps_in(2)%data(:ncol,c) + fact2*file%ps_in(4)%data(:ncol,c)
           endif
           do f = 1,nflds
-             flds(f)%input(2)%data(:ncol,:,c) = fact1*flds(f)%input(2)%data(:ncol,:,c) + fact2*flds(f)%input(4)%data(:ncol,:,c) 
+             flds(f)%input(2)%data(:ncol,:,c) = fact1*flds(f)%input(2)%data(:ncol,:,c) + fact2*flds(f)%input(4)%data(:ncol,:,c)
           enddo
        enddo
 
@@ -2033,13 +1959,9 @@ contains
           data_out3d => flds(f)%data(:,:,:)
        endif
 
-!$OMP PARALLEL DO PRIVATE (C, NCOL, PS, I, K, PIN, DATAIN, MODEL_Z, DATA_OUT)
+!$OMP PARALLEL DO PRIVATE (C, NCOL, PS, I, K, PIN, DATAIN, MODEL_Z, DATA_OUT, DATA_COL)
        do c = begchunk,endchunk
           if (flds(f)%pbuf_ndx>0) then
-             if(.not.present(pbuf2d)) then                
-                call endrun ('tracer_data.F90(subr interpolate_trcdata):' // &
-                     'pbuf2d must be passed as an argument for pbuf_get_field subr call')
-             endif
              call pbuf_get_field(pbuf2d, c, flds(f)%pbuf_ndx, data_out)
           else
              data_out => data_out3d(:,:,c+chnk_offset)
@@ -2050,11 +1972,19 @@ contains
              if (fact2 == 0) then  ! This needed as %data is not set if fact2=0 (and lahey compiler core dumps)
                 datain(:ncol,:) = fact1*flds(f)%input(nm)%data(:ncol,:,c)
              else
-                datain(:ncol,:) = fact1*flds(f)%input(nm)%data(:ncol,:,c) + fact2*flds(f)%input(np)%data(:ncol,:,c) 
+                datain(:ncol,:) = fact1*flds(f)%input(nm)%data(:ncol,:,c) + fact2*flds(f)%input(np)%data(:ncol,:,c)
              end if
              do i = 1,ncol
                 model_z(1:pverp) = m2km * state(c)%zi(i,pverp:1:-1)
-                call rebin( file%nlev, pver, file%ilevs, model_z, datain(i,:), data_out(i,:) )
+                if (file%geop_alt) then
+                   model_z(1:pverp) = model_z(1:pverp) + m2km * state(c)%phis(i)*rga
+                endif
+                if (file%conserve_column) then
+                   call interpz_conserve( file%nlev, pver, file%ilevs, model_z, datain(i,:), data_col(:) )
+                else
+                   call rebin( file%nlev, pver, file%ilevs, model_z, datain(i,:), data_col(:) )
+                end if
+                data_out(i,:) = data_col(pver:1:-1)
              enddo
 
           else
@@ -2064,7 +1994,7 @@ contains
                    if (fact2 == 0) then  ! This needed as %data is not set if fact2=0 (and lahey compiler core dumps)
                       ps(:ncol) = fact1*file%ps_in(nm)%data(:ncol,c)
                    else
-                      ps(:ncol) = fact1*file%ps_in(nm)%data(:ncol,c) + fact2*file%ps_in(np)%data(:ncol,c) 
+                      ps(:ncol) = fact1*file%ps_in(nm)%data(:ncol,c) + fact2*file%ps_in(np)%data(:ncol,c)
                    end if
                    do i = 1,ncol
                       do k = 1,file%nlev
@@ -2075,12 +2005,6 @@ contains
                    do k = 1,file%nlev
                       pin(:,k) = file%levs(k)
                    enddo
-                   !!Currently designed for linoz_v2/v3 use
-                   if (file%linoz_v3 .or. file%linoz_v2) then
-                      do k = 1,file%nilev
-                         pint(:,k) = file%ilevs(k)
-                      enddo
-                   endif
                 endif
              endif
 
@@ -2091,7 +2015,7 @@ contains
                            fact1*flds(f)%input(nm)%data(i,1,c)
                    else
                       data_out(i,1) = &
-                           fact1*flds(f)%input(nm)%data(i,1,c) + fact2*flds(f)%input(np)%data(i,1,c) 
+                           fact1*flds(f)%input(nm)%data(i,1,c) + fact2*flds(f)%input(np)%data(i,1,c)
                    endif
                 enddo
              else
@@ -2101,24 +2025,13 @@ contains
                    datain(:ncol,:) = fact1*flds(f)%input(nm)%data(:ncol,:,c) + fact2*flds(f)%input(np)%data(:ncol,:,c)
                 end if
                 if ( file%top_bndry ) then
-                   call vert_interp_ub(ncol, file%nlev, file%levs,  datain(:ncol,:), data_out(:ncol,:) )
+                   call vert_interp_ub(ncol, file%nlev, file%levs,  datain(:ncol,:), data_out(:ncol,1) )
+                else if ( file%top_layer ) then
+                   call vert_interp_ub_var(ncol, file%nlev, file%levs, state(c)%pmid(:ncol,1), datain(:ncol,:), data_out(:ncol,1) )
                 else if(file%conserve_column) then
                    call vert_interp_mixrat(ncol,file%nlev,pver,state(c)%pint, &
                         datain, data_out(:,:), &
-                        file%p0,ps,file%hyai,file%hybi)
-                else if(file%linoz_v3 .or. file%linoz_v2) then
-                !!uci chemistry for linoz that better conserves mass
-                !!uci interpolation for 55 out of 57 variables in linoz_v3
-                !!excluding t_clim, o3col_clim
-                !!for linoz_v2 it is simiar with less variables
-                   if (flds(f)%fldnam.ne.'t_clim          ' &
-                  .and.flds(f)%fldnam.ne.'o3col_clim      ') then
-                   !!file ilevs is in hPa, while model level in Pa, so times 100
-                   call vert_interp_uci(ncol, file%nlev, 100*file%ilevs, state(c)%pint, datain, data_out(:,:) )
-                   else
-                   call vert_interp(ncol, file%nlev, pin, state(c)%pmid, datain, data_out(:,:) )
-                   endif
-                !!
+                        file%p0,ps,file%hyai,file%hybi,file%dist)
                 else
                    call vert_interp(ncol, file%nlev, pin, state(c)%pmid, datain, data_out(:,:) )
                 endif
@@ -2143,10 +2056,11 @@ contains
     real(r8), optional, pointer, dimension(:) :: data
 
     integer :: vid, ierr, id
+    integer :: err_handling
 
-    call pio_seterrorhandling( fid, PIO_BCAST_ERROR)
+    call pio_seterrorhandling( fid, PIO_BCAST_ERROR, oldmethod=err_handling)
     ierr = pio_inq_dimid( fid, dname, id )
-    call pio_seterrorhandling( fid, PIO_INTERNAL_ERROR)
+    call pio_seterrorhandling( fid, err_handling)
 
     if ( ierr==PIO_NOERR ) then
 
@@ -2193,7 +2107,7 @@ contains
     integer, intent(out) :: cyc_ndx_end
     integer, intent(in)  :: cyc_yr
 
-    integer, allocatable , dimension(:) :: dates, datesecs
+    integer, allocatable , dimension(:) :: dates
     integer :: timesize, i, astat, year, ierr
     type(var_desc_T) :: dateid
     call get_dimension( fileid, 'time', timesize )
@@ -2248,11 +2162,12 @@ contains
     integer, optional, intent(in) :: cyc_yr
 
     character(len=shr_kind_cl) :: filen, filepath
-    integer :: year, month, day, dsize, i, timesize
+    integer :: year, month, day, i, timesize
     integer :: dateid,secid
     integer, allocatable , dimension(:) :: dates, datesecs
     integer :: astat, ierr
     logical :: need_first_ndx
+    integer :: err_handling
 
     if (len_trim(path) == 0) then
        filepath = trim(fname)
@@ -2267,7 +2182,7 @@ contains
     if(masterproc) write(iulog,*)'open_trc_datafile: ',trim(filen)
 
     call get_dimension(piofile, 'time', timesize)
-    
+
     if ( associated(times) ) then
        deallocate(times, stat=ierr)
        if( ierr /= 0 ) then
@@ -2293,10 +2208,10 @@ contains
     end if
 
     ierr =  pio_inq_varid( piofile, 'date',    dateid  )
-    call pio_seterrorhandling( piofile, PIO_BCAST_ERROR)
+    call pio_seterrorhandling( piofile, PIO_BCAST_ERROR, oldmethod=err_handling)
     ierr = pio_inq_varid( piofile, 'datesec', secid  )
-    call pio_seterrorhandling( piofile, PIO_INTERNAL_ERROR)
-    
+    call pio_seterrorhandling( piofile, err_handling)
+
     if(ierr==PIO_NOERR) then
        ierr = pio_get_var( piofile, secid,  datesecs  )
     else
@@ -2329,16 +2244,16 @@ contains
        if(masterproc) write(iulog,*) 'open_trc_datafile: failed to deallocate dates array; error = ',astat
        call endrun
     end if
-    deallocate( datesecs, stat=astat  )       
+    deallocate( datesecs, stat=astat  )
     if( astat/= 0 ) then
        if(masterproc) write(iulog,*) 'open_trc_datafile: failed to deallocate datesec array; error = ',astat
        call endrun
     end if
-       
+
     if ( present(cyc_yr) .and. present(cyc_ndx_beg) ) then
        if (cyc_ndx_beg < 0) then
           write(iulog,*) 'open_trc_datafile: cycle year not found : ' , cyc_yr
-          call endrun('open_trc_datafile: cycle year not found')
+          call endrun('open_trc_datafile: cycle year not found '//trim(filepath))
        endif
     endif
 
@@ -2422,15 +2337,15 @@ contains
     character(len=*), intent(in) :: whence
     type(file_desc_t), intent(inout) :: piofile
     type(trfile), intent(inout) :: tr_file
- 
+
     character(len=32) :: name
     integer :: ioerr, mcdimid, maxlen
- 
+    integer :: err_handling
 
     ! Dimension should already be defined in restart file
-    call pio_seterrorhandling(pioFile, PIO_BCAST_ERROR)
+    call pio_seterrorhandling(pioFile, PIO_BCAST_ERROR, oldmethod=err_handling)
     ioerr = pio_inq_dimid(pioFile,'max_chars', mcdimid)
-    call pio_seterrorhandling(pioFile, PIO_INTERNAL_ERROR)
+    call pio_seterrorhandling(pioFile, err_handling)
     ! but define it if nessasary
     if(ioerr/= PIO_NOERR) then
        ioerr = pio_def_dim(pioFile, 'max_chars', SHR_KIND_CL, mcdimid)
@@ -2442,7 +2357,7 @@ contains
        ioerr = pio_def_var(pioFile, name,pio_char,  (/mcdimid/), tr_file%currfnameid)
        ioerr = pio_put_att(pioFile, tr_file%currfnameid, 'offset_time', tr_file%offset_time)
        maxlen = len_trim(tr_file%curr_filename)
-       ioerr = pio_put_att(pioFile, tr_file%currfnameid, 'actual_len', maxlen)	
+       ioerr = pio_put_att(pioFile, tr_file%currfnameid, 'actual_len', maxlen)
     else
        nullify(tr_file%currfnameid)
     end if
@@ -2467,7 +2382,7 @@ contains
     type(file_desc_t), intent(inout) :: piofile
     type(trfile), intent(inout) :: tr_file
 
-    integer :: ioerr, slen   ! error status
+    integer :: ioerr   ! error status
     if(associated(tr_file%currfnameid)) then
        ioerr = pio_put_var(pioFile, tr_file%currfnameid, tr_file%curr_filename)
        deallocate(tr_file%currfnameid)
@@ -2494,8 +2409,9 @@ contains
     character(len=64) :: name
     integer :: ioerr   ! error status
     integer :: slen
+    integer :: err_handling
 
-    call PIO_SetErrorHandling(piofile, PIO_BCAST_ERROR)
+    call PIO_SetErrorHandling(piofile, PIO_BCAST_ERROR, oldmethod=err_handling)
     name = trim(whence)//'_curr_fname'
     ioerr = pio_inq_varid(piofile, name, vdesc)
     if(ioerr==PIO_NOERR) then
@@ -2514,22 +2430,92 @@ contains
        ioerr = pio_get_var(piofile, vdesc, tr_file%next_filename)
        if(slen<SHR_KIND_CL) tr_file%next_filename(slen+1:)=' '
     end if
-    call PIO_SetErrorHandling(piofile, PIO_INTERNAL_ERROR)
+    call PIO_SetErrorHandling(piofile, err_handling)
 
 
 
   end subroutine read_trc_restart
 !------------------------------------------------------------------------------
-   subroutine vert_interp_mixrat( ncol, nsrc, ntrg, trg_x, src, trg, p0, ps, hyai, hybi)
-  
+  subroutine interpz_conserve( nsrc, ntrg, src_x, trg_x, src, trg)
+
     implicit none
 
-    integer, intent(in)   :: ncol 
+    integer, intent(in)   :: nsrc                  ! dimension source array
+    integer, intent(in)   :: ntrg                  ! dimension target array
+    real(r8), intent(in)  :: src_x(nsrc+1)         ! source coordinates
+    real(r8), intent(in)  :: trg_x(ntrg+1)         ! target coordinates
+    real(r8), intent(in)  :: src(nsrc)             ! source array
+    real(r8), intent(out) :: trg(ntrg)             ! target array
+
+    !---------------------------------------------------------------
+    !   ... local variables
+    !---------------------------------------------------------------
+    integer  :: i, j
+    integer  :: sil
+    real(r8) :: tl, y
+    real(r8) :: bot, top
+
+
+    do i = 1, ntrg
+       tl = trg_x(i)
+       if ( (tl<src_x(nsrc+1)).and.(trg_x(i+1)>src_x(1)) ) then
+          do sil = 1,nsrc
+             if ( (tl-src_x(sil))*(tl-src_x(sil+1))<=0.0_r8 ) then
+                exit
+             end if
+          end do
+
+          if ( tl<src_x(1) ) sil = 1
+
+          y = 0.0_r8
+          bot = max(tl,src_x(1))
+          top = trg_x(i+1)
+          do j = sil, nsrc
+             if ( top>src_x(j+1) ) then
+                y = y+(src_x(j+1)-bot)*src(j)/(src_x(j+1)-src_x(j))
+                bot = src_x(j+1)
+             else
+                y = y+(top-bot)*src(j)/(src_x(j+1)-src_x(j))
+                exit
+             endif
+          enddo
+          trg(i) = y
+       else
+          trg(i) = 0.0_r8
+       end if
+    end do
+
+    if ( trg_x(1)>src_x(1) ) then
+       top = trg_x(1)
+       bot = src_x(1)
+       y = 0.0_r8
+       do j = 1, nsrc
+          if ( top>src_x(j+1) ) then
+             y = y+(src_x(j+1)-bot)*src(j)/(src_x(j+1)-src_x(j))
+             bot = src_x(j+1)
+          else
+             y = y+(top-bot)*src(j)/(src_x(j+1)-src_x(j))
+             exit
+          endif
+       enddo
+       trg(1) = trg(1)+y
+    endif
+
+
+  end subroutine interpz_conserve
+
+!------------------------------------------------------------------------------
+   subroutine vert_interp_mixrat( ncol, nsrc, ntrg, trg_x, src, trg, p0, ps, hyai, hybi, use_flight_distance)
+
+    implicit none
+
+    integer, intent(in)   :: ncol
     integer, intent(in)   :: nsrc                  ! dimension source array
     integer, intent(in)   :: ntrg                  ! dimension target array
     real(r8)              :: src_x(nsrc+1)         ! source coordinates
     real(r8), intent(in)      :: trg_x(pcols,ntrg+1)         ! target coordinates
     real(r8), intent(in)      :: src(pcols,nsrc)             ! source array
+    logical, intent(in)   :: use_flight_distance                    ! .true. = flight distance, .false. = mixing ratio
     real(r8), intent(out)     :: trg(pcols,ntrg)             ! target array
 
     real(r8) :: ps(pcols), p0, hyai(nsrc+1), hybi(nsrc+1)
@@ -2540,72 +2526,90 @@ contains
     integer  :: sil
     real(r8)     :: tl, y
     real(r8)     :: bot, top
-   
-  
-    
+
+
+
     do n = 1,ncol
-    
-    do i=1,nsrc+1
-     src_x(i) = p0*hyai(i)+ps(n)*hybi(i)
-    enddo
 
-    do i = 1, ntrg
-       tl = trg_x(n,i+1)
-       if( (tl.gt.src_x(1)).and.(trg_x(n,i).lt.src_x(nsrc+1)) ) then
-          do sil = 1,nsrc
-             if( (tl-src_x(sil))*(tl-src_x(sil+1)).le.0.0_r8 ) then
-                exit
-             end if
-          end do
+       do i=1,nsrc+1
+          src_x(i) = p0*hyai(i)+ps(n)*hybi(i)
+       enddo
 
-          if( tl.gt.src_x(nsrc+1)) sil = nsrc
+       do i = 1, ntrg
+          tl = trg_x(n,i+1)
+          if( (tl>src_x(1)).and.(trg_x(n,i)<src_x(nsrc+1)) ) then
+             do sil = 1,nsrc
+                if( (tl-src_x(sil))*(tl-src_x(sil+1))<=0.0_r8 ) then
+                   exit
+                end if
+             end do
 
+          if( tl>src_x(nsrc+1)) sil = nsrc
+
+             y = 0.0_r8
+             bot = min(tl,src_x(nsrc+1))
+             top = trg_x(n,i)
+             do j = sil,1,-1
+                if( top<src_x(j) ) then
+                    if(use_flight_distance) then
+                        y = y+(bot-src_x(j))*src(n,j)/(src_x(j+1)-src_x(j))
+                    else
+                        y = y+(bot-src_x(j))*src(n,j)
+                    endif
+                    bot = src_x(j)
+                else
+                   if(use_flight_distance) then
+                      y = y+(bot-top)*src(n,j)/(src_x(j+1)-src_x(j))
+                   else
+                      y = y+(bot-top)*src(n,j)
+                   endif
+                   exit
+                endif
+             enddo
+             trg(n,i) = y
+          else
+             trg(n,i) = 0.0_r8
+          end if
+       end do
+
+       if( trg_x(n,ntrg+1)<src_x(nsrc+1) ) then
+          top = trg_x(n,ntrg+1)
+          bot = src_x(nsrc+1)
           y = 0.0_r8
-          bot = min(tl,src_x(nsrc+1))   
-          top = trg_x(n,i)
-          do j = sil,1,-1
-           if( top.lt.src_x(j) ) then
-             y = y+(bot-src_x(j))*src(n,j)
-            bot = src_x(j)
-           else
-            y = y+(bot-top)*src(n,j)
-            exit
-           endif
+          do j=nsrc,1,-1
+             if( top<src_x(j) ) then
+                if(use_flight_distance) then
+                   y = y+(bot-src_x(j))*src(n,j)/(src_x(j+1)-src_x(j))
+                else
+                   y = y+(bot-src_x(j))*src(n,j)
+                endif
+                bot = src_x(j)
+             else
+                if(use_flight_distance) then
+                   y = y+(bot-top)*src(n,j)/(src_x(j+1)-src_x(j))
+                else
+                   y = y+(bot-top)*src(n,j)
+                endif
+                exit
+             endif
           enddo
-          trg(n,i) = y
-       else
-        trg(n,i) = 0.0_r8
-       end if
-    end do
+          trg(n,ntrg) = trg(n,ntrg)+y
+       endif
 
-    if( trg_x(n,ntrg+1).lt.src_x(nsrc+1) ) then
-     top = trg_x(n,ntrg+1)
-     bot = src_x(nsrc+1)
-     y = 0.0_r8
-     do j=nsrc,1,-1
-      if( top.lt.src_x(j) ) then
-       y = y+(bot-src_x(j))*src(n,j)
-       bot = src_x(j)
-      else
-       y = y+(bot-top)*src(n,j)
-       exit
-      endif
-     enddo
-     trg(n,ntrg) = trg(n,ntrg)+y
-    endif
+       ! turn mass into mixing ratio
+       if(.not. use_flight_distance) then
+          do i=1,ntrg
+             trg(n,i) = trg(n,i)/(trg_x(n,i+1)-trg_x(n,i))
+          enddo
+       endif
 
-! turn mass into mixing ratio 
-    do i=1,ntrg
-     trg(n,i) = trg(n,i)/(trg_x(n,i+1)-trg_x(n,i))
-    enddo
-    
     enddo
 
    end subroutine vert_interp_mixrat
 !------------------------------------------------------------------------------
   subroutine vert_interp( ncol, levsiz, pin, pmid, datain, dataout )
-    !-------------------------------------------------------------------------- 
-    ! 
+    !--------------------------------------------------------------------------
+    !
     ! Interpolate data from current time-interpolated values to model levels
     !--------------------------------------------------------------------------
     implicit none
@@ -2614,9 +2618,10 @@ contains
     integer,  intent(in)  :: ncol                ! number of atmospheric columns
     integer,  intent(in)  :: levsiz
     real(r8), intent(in)  :: pin(pcols,levsiz)
-    real(r8), intent(in)  :: pmid(pcols,pver)          ! level pressures 
+    real(r8), intent(in)  :: pmid(pcols,pver)          ! level pressures
     real(r8), intent(in)  :: datain(pcols,levsiz)
-    real(r8), intent(out) :: dataout(pcols,pver)     
+    real(r8), intent(out) :: dataout(pcols,pver)
+
     !
     ! local storage
     !
@@ -2651,16 +2656,16 @@ contains
        !
        do kk=kkstart,levsiz-1
           do i=1,ncol
-             if (pin(i,kk).lt.pmid(i,k) .and. pmid(i,k).le.pin(i,kk+1)) then
+             if (pin(i,kk)<pmid(i,k) .and. pmid(i,k)<=pin(i,kk+1)) then
                 kupper(i) = kk
              end if
           end do
        end do
        ! interpolate or extrapolate...
        do i=1,ncol
-          if (pmid(i,k) .lt. pin(i,1)) then
+          if (pmid(i,k) < pin(i,1)) then
              dataout(i,k) = datain(i,1)*pmid(i,k)/pin(i,1)
-          else if (pmid(i,k) .gt. pin(i,levsiz)) then
+          else if (pmid(i,k) > pin(i,levsiz)) then
              dataout(i,k) = datain(i,levsiz)
           else
              dpu = pmid(i,k) - pin(i,kupper(i))
@@ -2673,92 +2678,14 @@ contains
 
 
   end subroutine vert_interp
-!------------------------------------------------------------------------------
-  SUBROUTINE vert_interp_uci(ncol,levsiz,pin,pint,datain,dataout)
-!-------------------------------------------------------------------------- 
-    ! 
-    ! Interpolate data from current time-interpolated values to model levels
-    !--------------------------------------------------------------------------
-    implicit none
-    ! Arguments
-    !
-    integer,  intent(in)  :: ncol
-    integer,  intent(in)  :: levsiz
-    real(r8), intent(in)  :: pin(levsiz+1) !inputdata interface level pressure
-    real(r8), intent(in)  :: pint(pcols,pver+1) !model interface level pressures
-    real(r8), intent(in)  :: datain(pcols,levsiz)
-    real(r8), intent(out) :: dataout(pcols,pver)
-    !
-    ! local storage
-    !
-    integer ::  i,k                   ! longitude index
-    ! Initialize index array
-    !
-    do k=1,pver
-        do i=1,ncol
-        call vert_interp_uci_single(pint(i,k+1),pint(i,k),dataout(i,k),pin,datain(i,:),levsiz)
-        enddo
-    enddo
-    !
-       END SUBROUTINE vert_interp_uci
-!------------------------------------------------------------------------------
-       SUBROUTINE vert_interp_uci_single(P1,P2,F0,P,F,NL)
-!-----------------------------------------------------------------------
-!---Ths function is the vertical interpolation used for 
-!---vertical interpolation of linoz tracers in E3SM.
-!---For a model level P bounded by pressure P1 > P2 (decreasing up) 
-!---    integrates (p-avg) the value F0 from F on the grid P
-!---    assumes model pressure increases from top to bottom.
-!---NOTE reverse order in P's
-!---Assume that the quantity is constant over range halfway to layer above/below
-!---    and calculate box edges from model top to model bottom
-!
-!---For a model level between pressure range P1 > P2 (decreasing up)
-!---calculate the SOM Z-moments of the loss freq at std z* (log-p) intervals
-!--------  the pressure levels BETWEEN z* values are:
-!                         P(i) < P(i+1) bounds z*(i)
-!-------- The MOMENTS for a square-wave or 'bar': F(x)=F0  b<=x<=c, =0.0 else
-!-----     S0 =   f0 (x)                      [from x=b to x=c]
-!-----------------------------------------------------------------------
-      implicit none
-      integer,  intent(in) ::   NL
-      real(r8), intent(in) ::   P1,P2,P(NL+1),F(NL)
-      real(r8), intent(out)::   F0
-      integer  I
-      real(r8)   XB,XC,PC,PB,SGNF0,PF1,PF2
-!-----------------------------------------------------------------------
-      F0 = 0._r8
-      !
-      do I = 1,NL
-        PF1=P(I)
-        PF2=P(I+1)
-        !
-        PC   = min(P1,PF2)
-        PB   = max(P2,PF1)
-        !
-        if (PC .gt. PB)  then
-!--- have condition:  P1 .ge. PC .gt. PB .ge. P2 
-!---      and          0 .le. XB .lt. XC .le. 1
-          XC = (PC-P2)/(P1-P2)
-          XB = (PB-P2)/(P1-P2)
-!-------- assume that the quantity, F, is constant over interval [XLO,XUP],
-!--------   F0: (c-b),   
-!-------- calculate its contribution to the moments in the interval [0,1]
-          F0 = F0 +F(I) *(XC -XB)
-        endif
-      enddo
-!---limiter on Z-moments: force monotonicity (tables can be + or -)
-      SGNF0 = sign(1._r8, F0)
-      F0 = abs(F0)
-      F0 = SGNF0 * F0
-      END SUBROUTINE vert_interp_uci_single
+
 !------------------------------------------------------------------------------
   subroutine vert_interp_ub( ncol, nlevs, plevs,  datain, dataout )
     use ref_pres, only : ptop_ref
 
 
-    !----------------------------------------------------------------------- 
-    ! 
+    !-----------------------------------------------------------------------
+    !
     ! Interpolate data from current time-interpolated values to top interface pressure
     !  -- from mo_tgcm_ubc.F90
     !--------------------------------------------------------------------------
@@ -2769,14 +2696,14 @@ contains
     integer,  intent(in)  :: nlevs
     real(r8), intent(in)  :: plevs(nlevs)
     real(r8), intent(in)  :: datain(ncol,nlevs)
-    real(r8), intent(out) :: dataout(ncol)   
+    real(r8), intent(out) :: dataout(ncol)
 
     !
     ! local variables
     !
     integer  :: i,ku,kl,kk
     real(r8) :: pinterp, delp
-    
+
     pinterp = ptop_ref
 
     if( pinterp <= plevs(1) ) then
@@ -2806,6 +2733,59 @@ contains
 
   end subroutine vert_interp_ub
 !------------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+  subroutine vert_interp_ub_var( ncol, nlevs, plevs, press, datain, dataout )
+
+    !-----------------------------------------------------------------------
+    !
+    ! Interpolate data from current time-interpolated values to press
+    !
+    !--------------------------------------------------------------------------
+    ! Arguments
+    !
+    integer,  intent(in)  :: ncol
+    integer,  intent(in)  :: nlevs
+    real(r8), intent(in)  :: plevs(nlevs)
+    real(r8), intent(in)  :: press(ncol)
+    real(r8), intent(in)  :: datain(ncol,nlevs)
+    real(r8), intent(out) :: dataout(ncol)
+
+    !
+    ! local variables
+    !
+    integer  :: i,k
+    integer  :: ku,kl
+    real(r8) :: delp
+
+
+    do i = 1,ncol
+
+       if( press(i) <= plevs(1) ) then
+          kl = 1
+          ku = 1
+          delp = 0._r8
+       else if( press(i) >= plevs(nlevs) ) then
+          kl = nlevs
+          ku = nlevs
+          delp = 0._r8
+       else
+
+          do k = 2,nlevs
+             if( press(i) <= plevs(k) ) then
+                ku = k
+                kl = k - 1
+                delp = log( press(i)/plevs(k) ) / log( plevs(k-1)/plevs(k) )
+                exit
+             end if
+          end do
+
+       end if
+
+       dataout(i) = datain(i,kl) + delp * (datain(i,ku) - datain(i,kl))
+    end do
+
+  end subroutine vert_interp_ub_var
+!------------------------------------------------------------------------------
 
 !------------------------------------------------------------------------------
 !------------------------------------------------------------------------------
@@ -2826,7 +2806,7 @@ contains
     !   local variables
     !-----------------------------------------------------------------------
     character(len=shr_kind_cl) :: ctmp
-    character(len=shr_kind_cl) :: loc_fname   
+    character(len=shr_kind_cl) :: loc_fname
     integer            :: istat, astat
 
     !-----------------------------------------------------------------------
@@ -2839,19 +2819,19 @@ contains
     !-----------------------------------------------------------------------
     if( file%remove_trc_file ) then
        call getfil( file%curr_filename, loc_fname, 0 )
-       write(iulog,*) 'advance_file: removing file = ',trim(loc_fname) 
-       ctmp = 'rm -f ' // trim(loc_fname) 
+       write(iulog,*) 'advance_file: removing file = ',trim(loc_fname)
+       ctmp = 'rm -f ' // trim(loc_fname)
        write(iulog,*) 'advance_file: fsystem issuing command - '
        write(iulog,*) trim(ctmp)
        call shr_sys_system( ctmp, istat )
     end if
-   
+
     !-----------------------------------------------------------------------
     !   Advance the filename and file id
     !-----------------------------------------------------------------------
     file%curr_filename = file%next_filename
     file%curr_fileid = file%next_fileid
-   
+
     !-----------------------------------------------------------------------
     !   Advance the curr_data_times
     !-----------------------------------------------------------------------
@@ -2866,12 +2846,12 @@ contains
        call endrun
     end if
     file%curr_data_times(:) = file%next_data_times(:)
-    
+
     !-----------------------------------------------------------------------
     !   delete information about next file (as was just assigned to current)
     !-----------------------------------------------------------------------
     file%next_filename = ''
-    
+
     deallocate( file%next_data_times, stat=astat )
     if( astat/= 0 ) then
        write(iulog,*) 'advance_file: failed to deallocate file%next_data_times array; error = ',astat
