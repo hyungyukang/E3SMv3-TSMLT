@@ -3,36 +3,85 @@
 !--------------------------------------------------------------------------------
 module rate_diags
 
-  use shr_kind_mod, only : r8 => shr_kind_r8
-  use cam_history,  only : fieldname_len
-  use cam_history,  only : addfld, horiz_only, add_default
-  use cam_history,  only : outfld
-  use chem_mods,    only : rxt_tag_cnt, rxt_tag_lst, rxt_tag_map
-  use ppgrid,       only : pver
-  use mo_constants, only : rgrav
-  use phys_control, only : phys_getopts
+  use shr_kind_mod,     only : r8 => shr_kind_r8
+  use shr_kind_mod,     only : CL => SHR_KIND_CL
+  use cam_history,      only : fieldname_len
+  use cam_history,      only : addfld, add_default
+  use cam_history,      only : outfld
+  use chem_mods,        only : rxt_tag_cnt, rxt_tag_lst, rxt_tag_map
+  use ppgrid,           only : pver
+  use spmd_utils,       only : masterproc
+  use cam_abortutils,   only : endrun
+  use sums_utils,       only : sums_grp_t, parse_sums
 
   implicit none
   private 
   public :: rate_diags_init
   public :: rate_diags_calc
+  public :: rate_diags_readnl
+  public :: rate_diags_o3s_loss
 
   character(len=fieldname_len) :: rate_names(rxt_tag_cnt)
 
+  integer :: ngrps = 0
+  type(sums_grp_t), allocatable :: grps(:)  
+
+  integer, parameter :: maxlines = 200
+  character(len=CL), allocatable :: rxn_rate_sums(:)
+
+  integer :: o3_ndx = -1
+
 contains
 
+!-------------------------------------------------------------------
+!-------------------------------------------------------------------
+  subroutine rate_diags_readnl(nlfile)
+
+    use namelist_utils,  only: find_group_name
+    use units,           only: getunit, freeunit
+    use spmd_utils,      only: mpicom, mpi_character, masterprocid
+
+    ! args 
+    character(len=*), intent(in) :: nlfile  ! filepath for file containing namelist input
+
+    ! Local variables
+    integer :: unitn, ierr
+
+    namelist /rxn_rate_diags_nl/ rxn_rate_sums
+
+    allocate( rxn_rate_sums( maxlines ) )
+    rxn_rate_sums(:) = ' '
+
+    ! Read namelist
+    if (masterproc) then
+       unitn = getunit()
+       open( unitn, file=trim(nlfile), status='old' )
+       call find_group_name(unitn, 'rxn_rate_diags_nl', status=ierr)
+       if (ierr == 0) then
+          read(unitn, rxn_rate_diags_nl, iostat=ierr)
+          if (ierr /= 0) then
+             call endrun('rate_diags_readnl:: ERROR reading namelist')
+          end if
+       end if
+       close(unitn)
+       call freeunit(unitn)
+    end if
+
+    ! Broadcast namelist variables
+    call mpi_bcast(rxn_rate_sums,len(rxn_rate_sums(1))*maxlines, mpi_character, masterprocid, mpicom, ierr)
+
+  end subroutine rate_diags_readnl
 !--------------------------------------------------------------------------------
 !--------------------------------------------------------------------------------
   subroutine rate_diags_init
+    use phys_control, only : phys_getopts
+    use mo_chem_utls, only : get_spc_ndx
 
     integer :: i, len, pos
-    logical  :: history_UCIgaschmbudget_2D ! output 2D gas chemistry tracer concentrations and tendencies
-    logical  :: history_UCIgaschmbudget_2D_levels ! output 2D gas chemistry tracer concentrations and tendencies within certain layers
-
     character(len=64) :: name
+!   logical :: history_scwaccm_forcing
 
-     call phys_getopts( history_UCIgaschmbudget_2D_out = history_UCIgaschmbudget_2D, &
-                       history_UCIgaschmbudget_2D_levels_out = history_UCIgaschmbudget_2D_levels)
+!   call phys_getopts( history_scwaccm_forcing_out = history_scwaccm_forcing )
 
     do i = 1,rxt_tag_cnt
        pos = 0
@@ -48,126 +97,122 @@ contains
        len = min(fieldname_len,len_trim(name))
        rate_names(i) = trim(name(1:len))
        call addfld(rate_names(i), (/ 'lev' /),'A', 'molecules/cm3/sec','reaction rate')
+!      if (history_scwaccm_forcing .and. rate_names(i) == 'r_O1D_H2O') then
+!         call add_default( rate_names(i), 1, ' ')
+!      endif
     enddo
 
-    if ( history_UCIgaschmbudget_2D ) then
-       call addfld('r_lch4_2D', horiz_only, 'A', 'kg/m2/s', 'CH4 vertically integrated reatction rate ')
-    endif
-    if ( history_UCIgaschmbudget_2D_levels) then 
-       call addfld('r_lch4_L1', horiz_only, 'A', 'kg/m2/s', 'CH4 vertically integrated reaction rate from top-of-model to 100 hPa')
-       call addfld('r_lch4_L2', horiz_only, 'A', 'kg/m2/s', 'CH4 vertically integrated reaction rate from 100 to 267 hPa')
-       call addfld('r_lch4_L3', horiz_only, 'A', 'kg/m2/s', 'CH4 vertically integrated reaction rate from 267 hPa to 856 hPa')
-       call addfld('r_lch4_L4', horiz_only, 'A', 'kg/m2/s', 'CH4 vertically integrated reaction rate from 856 hPa to surface')
-    endif
-    if ( history_UCIgaschmbudget_2D ) then
-       call add_default( 'r_lch4_2D', 1, ' ' )
-    endif
-    if ( history_UCIgaschmbudget_2D_levels ) then
-       call add_default( 'r_lch4_L1', 1, ' ' )
-       call add_default( 'r_lch4_L2', 1, ' ' )
-       call add_default( 'r_lch4_L3', 1, ' ' )
-       call add_default( 'r_lch4_L4', 1, ' ' )
-    endif
-    
+    ! parse the terms of the summations
+    call parse_sums(rxn_rate_sums, ngrps, grps)
+
+    deallocate( rxn_rate_sums )
+
+    do i = 1, ngrps
+       call addfld( grps(i)%name, (/ 'lev' /),'A', 'molecules/cm3/sec','reaction rate group')
+    enddo
+
+    o3_ndx = get_spc_ndx('O3')
+
   end subroutine rate_diags_init
 
 !--------------------------------------------------------------------------------
 !--------------------------------------------------------------------------------
-  subroutine rate_diags_calc( rxt_rates, vmr, m, ncol, lchnk, pver, pdeldry, mbar )
+  subroutine rate_diags_calc( rxt_rates, vmr, m, ncol, lchnk )
 
     use mo_rxt_rates_conv, only: set_rates
-    use chem_mods,    only : gas_pcnst, rxntot
 
     real(r8), intent(inout) :: rxt_rates(:,:,:) ! 'molec/cm3/sec'
     real(r8), intent(in)    :: vmr(:,:,:)
     real(r8), intent(in)    :: m(:,:)           ! air density (molecules/cm3)
-    integer,  intent(in)    :: ncol, lchnk, pver
-    real(r8), intent(in)    :: pdeldry(:,:)
-    real(r8), intent(in)    :: mbar(:,:)
+    integer,  intent(in)    :: ncol, lchnk
 
-    integer :: i, k
-
-    real(r8)  :: rxt_rates_vmr(ncol,pver,max(1,rxntot)) ! 'vmr/sec'
-    real(r8)  :: wrk(ncol,pver)
-    real(r8)  :: wrk_sum(ncol)
-    real(r8)  :: adv_mass_ch4
-    logical  :: history_UCIgaschmbudget_2D ! output 2D gas chemistry tracer concentrations and tendencies
-    logical  :: history_UCIgaschmbudget_2D_levels ! output 2D gas chemistry tracer concentrations and tendencies within certain layers
-    integer  :: gaschmbudget_2D_L1_s ! Start layer of L1 for gas chemistry tracer budget 
-    integer  :: gaschmbudget_2D_L1_e ! End layer of L1 for gas chemistry trracer budget
-    integer  :: gaschmbudget_2D_L2_s
-    integer  :: gaschmbudget_2D_L2_e
-    integer  :: gaschmbudget_2D_L3_s
-    integer  :: gaschmbudget_2D_L3_e
-    integer  :: gaschmbudget_2D_L4_s
-    integer  :: gaschmbudget_2D_L4_e
-
-    call phys_getopts( history_UCIgaschmbudget_2D_out = history_UCIgaschmbudget_2D, &
-                       history_UCIgaschmbudget_2D_levels_out = history_UCIgaschmbudget_2D_levels, &
-                       gaschmbudget_2D_L1_s_out = gaschmbudget_2D_L1_s, &
-                       gaschmbudget_2D_L1_e_out = gaschmbudget_2D_L1_e, &
-                       gaschmbudget_2D_L2_s_out = gaschmbudget_2D_L2_s, &
-                       gaschmbudget_2D_L2_e_out = gaschmbudget_2D_L2_e, &
-                       gaschmbudget_2D_L3_s_out = gaschmbudget_2D_L3_s, &
-                       gaschmbudget_2D_L3_e_out = gaschmbudget_2D_L3_e, &
-                       gaschmbudget_2D_L4_s_out = gaschmbudget_2D_L4_s, &
-                       gaschmbudget_2D_L4_e_out = gaschmbudget_2D_L4_e )
-
-
-    rxt_rates_vmr = 0._r8
-    adv_mass_ch4 = 16._r8
+    integer :: i, j, ndx
+    real(r8) :: group_rate(ncol,pver)
 
     call set_rates( rxt_rates, vmr, ncol )
 
-    rxt_rates_vmr = rxt_rates
-
+    ! output individual tagged rates    
     do i = 1, rxt_tag_cnt
        ! convert from vmr/sec to molecules/cm3/sec
-       rxt_rates(:ncol,:,rxt_tag_map(i)) = rxt_rates(:ncol,:,rxt_tag_map(i)) *  m(:,:)
+       rxt_rates(:ncol,:,rxt_tag_map(i)) = rxt_rates(:ncol,:,rxt_tag_map(i)) * m(:ncol,:)
        call outfld( rate_names(i), rxt_rates(:ncol,:,rxt_tag_map(i)), ncol, lchnk )
-
-       if ( .not. history_UCIgaschmbudget_2D .and. .not. history_UCIgaschmbudget_2D_levels) return
-
-       if (rate_names(i) .eq. 'r_lch4') then
-          !kg/m2/sec
-          wrk(:ncol,:) = adv_mass_ch4*rxt_rates_vmr(:ncol,:,rxt_tag_map(i))/mbar(:ncol,:) &
-                                *pdeldry(:ncol,:)*rgrav
-
-       if (history_UCIgaschmbudget_2D_levels) then
-          wrk_sum(:ncol) = 0.0_r8
-            do k = gaschmbudget_2D_L1_s, gaschmbudget_2D_L1_e
-               wrk_sum(:ncol) = wrk_sum(:ncol) + wrk(:ncol,k)
-            enddo
-            call outfld( 'r_lch4_L1', wrk_sum(:ncol), ncol ,lchnk )
-          wrk_sum(:ncol) = 0.0_r8
-            do k = gaschmbudget_2D_L2_s, gaschmbudget_2D_L2_e
-               wrk_sum(:ncol) = wrk_sum(:ncol) + wrk(:ncol,k)
-            enddo
-            call outfld( 'r_lch4_L2', wrk_sum(:ncol), ncol ,lchnk )
-          wrk_sum(:ncol) = 0.0_r8
-            do k = gaschmbudget_2D_L3_s, gaschmbudget_2D_L3_e
-               wrk_sum(:ncol) = wrk_sum(:ncol) + wrk(:ncol,k)
-            enddo
-            call outfld( 'r_lch4_L3', wrk_sum(:ncol), ncol ,lchnk )
-          wrk_sum(:ncol) = 0.0_r8
-            do k = gaschmbudget_2D_L4_s, gaschmbudget_2D_L4_e
-               wrk_sum(:ncol) = wrk_sum(:ncol) + wrk(:ncol,k)
-            enddo
-            call outfld( 'r_lch4_L4', wrk_sum(:ncol), ncol ,lchnk )
-            do k=2,pver
-               wrk(:ncol,1) = wrk(:ncol,1) + wrk(:ncol,k)
-            enddo
-            call outfld( 'r_lch4_2D', wrk(:ncol,1), ncol ,lchnk )
-       elseif (history_UCIgaschmbudget_2D) then          
-            do k=2,pver
-               wrk(:ncol,1) = wrk(:ncol,1) + wrk(:ncol,k)
-            enddo
-            call outfld( 'r_lch4_2D', wrk(:ncol,1), ncol ,lchnk )
-       endif
-
-       endif
     enddo
 
+    ! output rate groups ( or families )
+    do i = 1, ngrps
+       group_rate(:,:) = 0._r8
+       do j = 1, grps(i)%nmembers
+         ndx = lookup_tag_ndx(grps(i)%term(j))
+         group_rate(:ncol,:) = group_rate(:ncol,:) + grps(i)%multipler(j)*rxt_rates(:ncol,:,ndx)
+       enddo 
+       call outfld( grps(i)%name, group_rate(:ncol,:), ncol, lchnk )       
+    end do
+
   end subroutine rate_diags_calc
+
+!--------------------------------------------------------------------------------
+!--------------------------------------------------------------------------------
+  function rate_diags_o3s_loss( rxt_rates, vmr, ncol ) result(o3s_loss)
+    use mo_rxt_rates_conv, only: set_rates
+    use chem_mods,         only: rxntot
+
+    real(r8), intent(in) :: rxt_rates(:,:,:)
+    real(r8), intent(in) :: vmr(:,:,:)
+    integer,  intent(in) :: ncol
+
+    real(r8) :: o3s_loss(ncol,pver) ! /sec
+
+    integer :: i, j, ndx
+    real(r8) :: group_rate(ncol,pver)
+    real(r8) :: lcl_rxt_rates(ncol,pver,rxntot)
+
+    o3s_loss(:,:) = 0._r8
+
+    if (o3_ndx>0) then
+       lcl_rxt_rates(:ncol,:,:) = rxt_rates(:ncol,:,:)
+       call set_rates( lcl_rxt_rates, vmr, ncol )
+
+       do i = 1, ngrps
+          if (trim(grps(i)%name)=='O3S_Loss') then
+             group_rate(:,:) = 0._r8
+             do j = 1, grps(i)%nmembers
+                ndx = lookup_tag_ndx(grps(i)%term(j))
+                group_rate(:ncol,:) = group_rate(:ncol,:) + grps(i)%multipler(j)*lcl_rxt_rates(:ncol,:,ndx)
+             enddo
+             o3s_loss(:ncol,:) = group_rate(:ncol,:)/vmr(:ncol,:,o3_ndx)
+          endif
+       end do
+    endif
+
+  end function rate_diags_o3s_loss
+
+!-------------------------------------------------------------------
+! Private routines :
+!-------------------------------------------------------------------
+!-------------------------------------------------------------------
+
+!-------------------------------------------------------------------
+! finds the index corresponging to a given reacton name
+!-------------------------------------------------------------------
+  function lookup_tag_ndx( name ) result( ndx )
+    character(len=*) :: name
+    integer :: ndx
+
+    integer :: i
+
+    ndx = -1
+
+    findloop: do i = 1,rxt_tag_cnt
+       if (trim(name) .eq. trim(rate_names(i)(3:))) then
+          ndx = i
+          return
+       endif
+    end do findloop
+
+    if (ndx<0) then
+       call endrun('rate_diags: not able to find rxn tag name: '//trim(name))
+    endif
+    
+  end function lookup_tag_ndx
 
 end module rate_diags

@@ -6,12 +6,12 @@
 !-------------------------------------------------------------------
 module aerodep_flx
 
-  use shr_kind_mod, only : r8 => shr_kind_r8
+  use shr_kind_mod,     only : r8 => shr_kind_r8
   use cam_abortutils,   only : endrun
-  use spmd_utils,   only : masterproc
-  use tracer_data,  only : trfld, trfile
-  use cam_logfile,  only : iulog
-  use ppgrid,       only : pcols, pver, begchunk, endchunk
+  use spmd_utils,       only : masterproc
+  use tracer_data,      only : trfld, trfile
+  use cam_logfile,      only : iulog
+  use ppgrid,           only : pcols, pver, begchunk, endchunk
 
   implicit none
   private
@@ -30,7 +30,7 @@ module aerodep_flx
   integer, parameter, public :: N_MODAL = 22
   integer :: number_flds
 
-  character(len=256) :: filename = ' '
+  character(len=256) :: filename = 'NONE'
   character(len=256) :: filelist = ' '
   character(len=256) :: datapath = ' '
   character(len=32)  :: datatype = 'SERIAL'
@@ -112,12 +112,12 @@ contains
 ! variable and sets up index variables
 !-------------------------------------------------------------------
   subroutine aerodep_flx_init()
-    
+
     use tracer_data, only : trcdata_init
     use cam_history, only : addfld, horiz_only
     use physics_buffer, only : physics_buffer_desc
     use modal_aero_deposition, only : modal_aero_deposition_init
-    
+
     implicit none
 
     integer :: ndx, istat, i
@@ -195,9 +195,12 @@ contains
        idx_dst3_wetis = index_modal_map(21)
        idx_dst3_wetcw = index_modal_map(22)
 
-       call modal_aero_deposition_init( bc1_ndx=idx_bc1,   pom1_ndx=idx_pom1, soa1_ndx=idx_soa1, &
-                                        soa2_ndx=idx_soa2, dst1_ndx=idx_dst1, dst3_ndx=idx_dst3, &
-                                        ncl3_ndx=idx_ncl3, so43_ndx=idx_so43 )
+       call modal_aero_deposition_init( bcphi_indices=(/idx_bc1/), &
+                                        ocphi_indices=(/idx_pom1,idx_soa1/), &
+                                        ocpho_indices=(/idx_soa2/), &
+                                        fine_dust_indices=(/idx_dst1/),&
+                                        crse_dust_indices=(/idx_dst3/) )
+
     else
 
        ibcphiwet = index_bulk_map(1)
@@ -307,7 +310,7 @@ subroutine aerodep_flx_readnl(nlfile)
    fixed_tod  = aerodep_flx_fixed_tod
 
    ! Turn on prescribed volcanics if user has specified an input dataset.
-   if (len_trim(filename) > 0 ) has_aerodep_flx = .true.
+   if (len_trim(filename) > 0 .and. filename.ne.'NONE' ) has_aerodep_flx = .true.
 
 end subroutine aerodep_flx_readnl
 

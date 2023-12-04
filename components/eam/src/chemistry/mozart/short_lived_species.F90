@@ -11,7 +11,7 @@ module short_lived_species
   use cam_logfile,  only : iulog
   use ppgrid,       only : pcols, pver, begchunk, endchunk
   use spmd_utils,   only : masterproc
-  
+
 
   implicit none
 
@@ -19,6 +19,8 @@ module short_lived_species
   private
   public :: map
   public :: register_short_lived_species
+  public :: short_lived_species_initic
+  public :: short_lived_species_writeic
   public :: initialize_short_lived_species
   public :: set_short_lived_species
   public :: get_short_lived_species
@@ -28,7 +30,7 @@ module short_lived_species
   integer :: pbf_idx
   integer :: map(nslvd)
 
-  character(len=16), parameter :: pbufname = 'ShortLivedSpecies'
+  character(len=*), parameter :: pbufname = 'ShortLivedSpecies'
 
 contains
 
@@ -36,10 +38,6 @@ contains
 !---------------------------------------------------------------------
   subroutine register_short_lived_species
     use physics_buffer, only : pbuf_add_field, dtype_r8
-
-    implicit none
-
-    integer :: m
 
     if ( nslvd < 1 ) return
 
@@ -49,37 +47,77 @@ contains
 
 !---------------------------------------------------------------------
 !---------------------------------------------------------------------
+  subroutine short_lived_species_initic
+#ifdef WACCMX_PHYS
+    use cam_history, only : addfld, add_default
+
+    integer :: m
+    character(len=24) :: varname
+
+    do m=1,nslvd
+       varname = trim(slvd_lst(m))//'&IC'
+       call addfld (varname, (/ 'lev' /),'I','kg/kg',trim(varname)//' not-transported species',gridname='physgrid')
+       call add_default (varname,0, 'I')
+    enddo
+#endif
+  end subroutine short_lived_species_initic
+
+!---------------------------------------------------------------------
+!---------------------------------------------------------------------
+  subroutine short_lived_species_writeic( lchnk, pbuf )
+    use cam_history,    only : outfld, write_inithist
+    use physics_buffer, only : physics_buffer_desc, pbuf_get_field
+
+    integer       , intent(in) :: lchnk  ! chunk identifier
+    type(physics_buffer_desc), pointer :: pbuf(:)
+#ifdef WACCMX_PHYS
+    real(r8),pointer :: tmpptr(:,:)
+    integer :: m
+    character(len=24) :: varname
+
+    if ( write_inithist() ) then
+       do m=1,nslvd
+          varname = trim(slvd_lst(m))//'&IC'
+          call pbuf_get_field(pbuf, pbf_idx, tmpptr, start=(/1,1,m/), kount=(/ pcols,pver,1 /))
+          call outfld(varname, tmpptr, pcols,lchnk)
+       enddo
+    endif
+#endif
+  end subroutine short_lived_species_writeic
+
+!---------------------------------------------------------------------
+!---------------------------------------------------------------------
   subroutine initialize_short_lived_species(ncid_ini, pbuf2d)
-    use ioFileMod,      only : getfil
-    use error_messages, only : handle_ncerr
-    use dycore,         only : dycore_is
-    use mo_tracname,    only : solsym
-    use ncdio_atm,      only : infld
-    use pio,            only : file_desc_t
-    use physics_buffer, only : physics_buffer_desc, pbuf_set_field, pbuf_get_chunk, pbuf_get_field
+    use cam_grid_support, only : cam_grid_check, cam_grid_id
+    use cam_grid_support, only : cam_grid_get_dim_names
+    use cam_abortutils,   only : endrun
+    use mo_tracname,      only : solsym
+    use ncdio_atm,        only : infld
+    use pio,              only : file_desc_t
+    use physics_buffer,   only : physics_buffer_desc, pbuf_set_field
 
     implicit none
 
     type(file_desc_t), intent(inout) :: ncid_ini
     type(physics_buffer_desc), pointer :: pbuf2d(:,:)
 
-
-    integer          :: m,n,lchnk
+    integer          :: m,n
+    integer          :: grid_id
     character(len=8) :: fieldname
-    character(len=4) :: dim1name
+    character(len=4) :: dim1name, dim2name
     logical          :: found
     real(r8),pointer :: tmpptr(:,:,:)   ! temporary pointer
-    real(r8),pointer :: tmpptrout(:,:)  ! temporary pointer
+    character(len=*), parameter :: subname='INITIALIZE_SHORT_LIVED_SPECIES'
 
     if ( nslvd < 1 ) return
 
     found = .false.
 
-    if(dycore_is('se')) then  
-       dim1name='ncol'
-    else
-       dim1name='lon'
+    grid_id = cam_grid_id('physgrid')
+    if (.not. cam_grid_check(grid_id)) then
+      call endrun(trim(subname)//': Internal error, no "physgrid" grid')
     end if
+    call cam_grid_get_dim_names(grid_id, dim1name, dim2name)
 
     call pbuf_set_field(pbuf2d, pbf_idx, 0._r8)
 
@@ -88,9 +126,17 @@ contains
     do m=1,nslvd
        n = map(m)
        fieldname = solsym(n)
-       call infld( fieldname,ncid_ini,dim1name, 'lev', 'lat', 1, pcols, 1, pver, begchunk, endchunk, &
+       call infld( fieldname,ncid_ini,dim1name, 'lev', dim2name, 1, pcols, 1, pver, begchunk, endchunk, &
                    tmpptr, found, gridname='physgrid')
+
+       if (.not.found) then
+          tmpptr(:,:,:) = 1.e-36_r8
+       endif
+
        call pbuf_set_field(pbuf2d, pbf_idx, tmpptr, start=(/1,1,m/),kount=(/pcols,pver,1/))
+
+       if (masterproc) write(iulog,*)  fieldname, ' is set to short-lived'
+
     enddo
 
     deallocate(tmpptr)
@@ -103,7 +149,7 @@ contains
 
     use physics_buffer, only : physics_buffer_desc, pbuf_set_field
 
-    implicit none 
+    implicit none
 
     real(r8), intent(in)               :: q(pcols,pver,gas_pcnst)
     integer,  intent(in)               :: lchnk, ncol
@@ -118,14 +164,14 @@ contains
        call pbuf_set_field(pbuf, pbf_idx, q(:,:,n), start=(/1,1,m/),kount=(/pcols,pver,1/))
     enddo
 
-  endsubroutine set_short_lived_species
+  end subroutine set_short_lived_species
 
 !---------------------------------------------------------------------
 !---------------------------------------------------------------------
   subroutine get_short_lived_species( q, lchnk, ncol, pbuf )
     use physics_buffer, only : physics_buffer_desc, pbuf_get_field
 
-    implicit none 
+    implicit none
 
     real(r8), intent(inout)            :: q(pcols,pver,gas_pcnst)
     integer,  intent(in)               :: lchnk, ncol
@@ -133,7 +179,7 @@ contains
     real(r8),pointer                   :: tmpptr(:,:)
 
 
-    integer :: m,n 
+    integer :: m,n
 
     if ( nslvd < 1 ) return
 
@@ -162,7 +208,7 @@ contains
     do m=1,nslvd
        if ( name == slvd_lst(m) ) then
           slvd_index = m
-          return 
+          return
        endif
     enddo
 

@@ -3,17 +3,16 @@ module mo_flbc
   ! 	... lower boundary module
   !---------------------------------------------------------------
 
-  use shr_kind_mod, only : r8 => shr_kind_r8
-  use m_types,      only : time_ramp
-  use spmd_utils,   only : masterproc,iam
+  use shr_kind_mod,     only : r8 => shr_kind_r8
+  use m_types,          only : time_ramp
+  use spmd_utils,       only : masterproc
   use cam_abortutils,   only : endrun
-  use ioFileMod,    only : getfil
-  use ppgrid,       only : pcols, begchunk, endchunk, pver
-  use time_manager, only : get_curr_date, get_curr_calday
-  use time_utils,   only : flt_date
-  use cam_logfile,  only : iulog
-  use constituents,  only : pcnst
-  use constituents,  only : tracnam=>cnst_name
+  use ioFileMod,        only : getfil
+  use ppgrid,           only : pcols, begchunk, endchunk, pver
+  use time_manager,     only : get_curr_date
+  use time_utils,       only : flt_date
+  use cam_logfile,      only : iulog
+  use constituents,     only : pcnst
 
   implicit none
 
@@ -28,6 +27,7 @@ module mo_flbc
   private
   public  :: flbc_inti, flbc_set, flbc_chk, has_flbc
   public  :: flbc_gmean_vmr
+  public  :: flbc_get_cfc11eq, flbc_has_cfc11eq
 
   save
 
@@ -35,18 +35,16 @@ module mo_flbc
 
   integer :: ntimes
   integer :: flbc_cnt
-  integer :: gndx
   integer :: tim_ndx(2)
-  integer :: jlim(2)
   integer, allocatable  :: dates(:)
   real(r8), allocatable     :: times(:)
-  logical :: has_flbc(pcnst)
-  character(len=256) :: filename, lpath, mspath
+  logical, protected :: has_flbc(pcnst)
+  character(len=256) :: filename
 
   type(time_ramp) :: flbc_timing
   integer ::  ncdate, ncsec
 
-  integer, parameter :: nghg = 5
+  integer, parameter :: nghg = 6
   integer, parameter :: max_nflbc = pcnst+nghg
 
   integer, parameter :: co2_ndx = 1
@@ -54,12 +52,14 @@ module mo_flbc
   integer, parameter :: n2o_ndx = 3
   integer, parameter :: f11_ndx = 4
   integer, parameter :: f12_ndx = 5
-  character(len=5)  :: ghg_names(nghg) = (/ 'CO2  ','CH4  ','N2O  ','CFC11','CFC12' /)
+  integer, parameter :: f11eq_ndx = 6
+  character(len=8)  :: ghg_names(nghg) = (/ 'CO2     ','CH4     ','N2O     ','CFC11   ','CFC12   ','CFC11eq ' /)
   integer :: ghg_indices(nghg) = -1
 
   type(flbc) :: flbcs(max_nflbc)
 
   logical, parameter :: debug = .false.
+  logical, protected :: flbc_has_cfc11eq = .false.
 
 contains
 
@@ -68,7 +68,6 @@ contains
     ! 	... initialize the fixed lower bndy cond
     !-----------------------------------------------------------------------
 
-    use mo_constants,  only : d2r, pi, rearth
     use string_utils,  only : to_upper
     use constituents,  only : cnst_get_ind
     use cam_pio_utils, only : cam_pio_openfile
@@ -89,20 +88,17 @@ contains
     ! 	... local variables
     !-----------------------------------------------------------------------
     integer :: astat
-    integer :: j, l, m, n                     ! Indices
+    integer :: m, n                     ! Indices
     integer :: t1, t2
     type(file_desc_t) :: ncid
     integer :: dimid
     integer :: varid
     integer :: yr, mon, day, wrk_date, wrk_sec
-    real(r8)    :: seq
     real(r8)    :: wrk_time
-    character(len=16)  :: species
-    character(len=16)  :: spc_name
     character(len=8)   :: time_type
     integer :: ierr
 
-    if ( len_trim( flbc_file ) == 0 ) return
+    if ( len_trim( flbc_file ) == 0 .or. flbc_file.eq.'NONE') return
 
     call get_curr_date( yr, mon, day, ncsec )
     ncdate = yr*10000 + mon*100 + day
@@ -128,7 +124,7 @@ contains
 
     wrk_sec  = ncsec
     if( time_type == 'SERIAL' ) then
-       wrk_date = ncdate 
+       wrk_date = ncdate
     else if( time_type == 'CYCLICAL' ) then
 
     	! If this is a leap-day, we have to avoid asking for a non-leap-year
@@ -136,7 +132,7 @@ contains
     	if (( mon .eq. 2 ) .and. ( day.eq.29 )) then
 	   ncdate = yr*10000 + mon*100 + (day-1)
            write(iulog,*)'WARNING: flbc_inti using Feb 28 instead of Feb 29 for cyclical dataset'
-        endif 	
+        endif
        wrk_date = flbc_timing%cycle_yr*10000 + mod(ncdate,10000)
     else
        wrk_date = flbc_timing%fixed_ymd
@@ -150,13 +146,14 @@ contains
     !-----------------------------------------------------------------------
     has_flbc(:) = .false.
     flbc_cnt = 0
-    
+
     do m = 1,max_nflbc
 
        if ( len_trim(flbc_list(m))==0 ) exit
 
        flbc_cnt = flbc_cnt + 1
 
+!      call cnst_get_ind (flbc_list(m), n, abort=.false.)
        call cnst_get_ind (flbc_list(m), n, abrtf=.false.)
 
        if (n > 0) then
@@ -181,9 +178,13 @@ contains
           flbcs(flbc_cnt)%species = 'CF2CL2'
        endif
 
+       if ( trim(flbc_list(m)) .eq. trim(ghg_names(f11eq_ndx)) ) then
+          flbc_has_cfc11eq = .true.
+       endif
+
     enddo
 
-    ! check that user has not set vmr namelist values... 
+    ! check that user has not set vmr namelist values...
     if ( ghg_indices(co2_ndx) > 0 .and. co2vmr>1.e-6_r8) then
        call endrun('flbc_inti: cannot specify both co2vmr and CO2 in flbc_file')
     endif
@@ -199,7 +200,7 @@ contains
     if ( ghg_indices(f12_ndx) > 0 .and. f12vmr > 0._r8) then
        call endrun('flbc_inti: cannot specify both f12vmr and CFC12 in flbc_file')
     endif
-    
+
     if( flbc_cnt == 0 ) then
        return
     end if
@@ -395,7 +396,7 @@ contains
                 write(iulog,*) 'flbc_chk: failed to allocate flbc vmr; error = ',astat
                 call endrun
              end if
-                
+
              if (flbcs(m)%has_mean) then
                 if( associated( flbcs(m)%vmr_mean ) ) then
                    deallocate( flbcs(m)%vmr_mean,stat=astat )
@@ -431,7 +432,7 @@ contains
     end if
 
   end subroutine flbc_chk
-  
+
   ! checks for global mean in input file
   function file_has_gmean(ncid,species)
     use pio, only : file_desc_t, pio_inq_varid, pio_noerr, pio_seterrorhandling, &
@@ -460,8 +461,9 @@ contains
     !-----------------------------------------------------------------------
     use mo_constants,  only : d2r, pi
     use phys_grid,     only: get_ncols_p, get_rlat_all_p, get_rlon_all_p
-    use pio,           only: file_desc_t, pio_get_var, pio_inq_varndims, &
-         pio_max_name, pio_inq_varid, pio_inq_dimlen, pio_inq_dimid
+    use pio,           only: file_desc_t, pio_get_var, pio_inq_varndims
+    use pio,           only: pio_max_name, pio_inq_varid, pio_inq_dimlen, pio_inq_dimid
+    use pio,           only: pio_seterrorhandling, PIO_BCAST_ERROR, PIO_INTERNAL_ERROR, PIO_NOERR
     use interpolate_data, only : interp_type, lininterp_init, lininterp_finish, lininterp
 
     implicit none
@@ -469,7 +471,7 @@ contains
     !-----------------------------------------------------------------------
     !       ... dummy arguments
     !-----------------------------------------------------------------------
-    type(file_desc_t), intent(in)           :: ncid
+    type(file_desc_t), intent(inout) :: ncid
     logical, intent(in)           :: initial
     type(flbc), intent(inout) :: lbcs
 
@@ -483,11 +485,9 @@ contains
     integer                     :: ierr
     integer                     :: vid, nlat, nlon
     integer                     :: dimid_lat, dimid_lon
-    integer                     :: plon, plat
     real(r8), allocatable           :: lat(:)
     real(r8), allocatable           :: lon(:)
     real(r8), allocatable           :: wrk(:,:,:), wrk_zonal(:,:)
-    real(r8), allocatable           :: wrk2d(:,:)
     character(len=pio_max_name)  :: varname
     real(r8), allocatable       :: locl_vmr(:,:,:)
     integer :: ndims, t, c, ncols
@@ -522,27 +522,25 @@ contains
        ierr = pio_inq_varid( ncid, 'lat', vid )
        ierr = pio_get_var( ncid, vid, lat )
        lat(:nlat) = lat(:nlat) * d2r
-       
+
        !-----------------------------------------------------------------------
        !           longitudes
        !-----------------------------------------------------------------------
+       call pio_seterrorhandling( ncid, PIO_BCAST_ERROR )
        ierr = pio_inq_dimid( ncid, 'lon', dimid_lon )
-       ierr = pio_inq_dimlen( ncid, dimid_lon, nlon )
-       allocate( lon(nlon),stat=ierr )
-       if( ierr /= 0 ) then
-          write(iulog,*) 'flbc_get: lon allocation error = ',ierr
-          call endrun
-       end if
-       ierr = pio_inq_varid( ncid, 'lon', vid )
-       ierr = pio_get_var( ncid, vid, lon )
-       lon(:nlon) = lon(:nlon) * d2r
+       call pio_seterrorhandling( ncid, PIO_INTERNAL_ERROR )
+       if (ierr == PIO_NOERR ) then
+          ierr = pio_inq_dimlen( ncid, dimid_lon, nlon )
+          allocate( lon(nlon),stat=ierr )
+          if( ierr /= 0 ) then
+             write(iulog,*) 'flbc_get: lon allocation error = ',ierr
+             call endrun
+          end if
+          ierr = pio_inq_varid( ncid, 'lon', vid )
+          ierr = pio_get_var( ncid, vid, lon )
+          lon(:nlon) = lon(:nlon) * d2r
+       endif
     end if initialization
-        
-    allocate( wrk(nlon,nlat,tcnt), stat=ierr )
-    if( ierr /= 0 ) then
-       write(iulog,*) 'flbc_get: wrk allocation error = ',ierr
-       call endrun
-    end if
 
     !-----------------------------------------------------------------------
     !       ... read data
@@ -550,11 +548,17 @@ contains
     varname = trim(lbcs%species) // '_LBC'
     ierr = pio_inq_varid( ncid, trim(varname), vid )
     ierr = pio_inq_varndims (ncid, vid, ndims)
-    
+
     if (ndims==2) then
        allocate( wrk_zonal(nlat,tcnt), stat=ierr )
        if( ierr /= 0 ) then
           write(iulog,*) 'flbc_get: wrk_zonal allocation error = ',ierr
+          call endrun
+       end if
+    else
+       allocate( wrk(nlon,nlat,tcnt), stat=ierr )
+       if( ierr /= 0 ) then
+          write(iulog,*) 'flbc_get: wrk allocation error = ',ierr
           call endrun
        end if
     endif
@@ -562,11 +566,6 @@ contains
     if (ndims==2) then
        ierr = pio_get_var( ncid, vid, (/ 1, t1/), &
             (/ nlat, tcnt /), wrk_zonal )
-       do t = 1,tcnt
-          do j = 1,nlat
-             wrk(:nlon,j,t) = wrk_zonal(j,t)
-          enddo
-       enddo
     else
        ierr = pio_get_var( ncid, vid, (/ 1, 1, t1/), &
             (/ nlon, nlat, tcnt /), wrk )
@@ -576,30 +575,36 @@ contains
        ncols = get_ncols_p(c)
        call get_rlat_all_p(c, pcols, to_lats)
        call get_rlon_all_p(c, pcols, to_lons)
-       call lininterp_init(lon, nlon, to_lons, ncols, 2, lon_wgts, zero, twopi)
-       call lininterp_init(lat, nlat, to_lats, ncols, 1, lat_wgts)
-          
-       do m = 1,tcnt
-          call lininterp(wrk(:,:,m), nlon, nlat, locl_vmr(:,c,m), ncols, lon_wgts, lat_wgts) 
-       end do
-          
 
-       call lininterp_finish(lon_wgts)
+       call lininterp_init(lat, nlat, to_lats, ncols, 1, lat_wgts)
+       if (ndims==2) then
+         do m = 1,tcnt
+             call lininterp(wrk_zonal(:,m), nlat, locl_vmr(:,c,m), ncols, lat_wgts)
+          end do
+       else
+          call lininterp_init(lon, nlon, to_lons, ncols, 2, lon_wgts, zero, twopi)
+
+          do m = 1,tcnt
+             call lininterp(wrk(:,:,m), nlon, nlat, locl_vmr(:,c,m), ncols, lon_wgts, lat_wgts)
+          end do
+
+
+          call lininterp_finish(lon_wgts)
+       end if
        call lininterp_finish(lat_wgts)
 
-
     end do
-
-    deallocate(wrk, stat=ierr)
-    if( ierr /= 0 ) then
-       write(iulog,*) 'flbc_get: Failed to deallocate wrk, ierr = ',ierr
-       call endrun
-    end if
 
     if (ndims==2) then
        deallocate( wrk_zonal,stat=ierr )
        if( ierr /= 0 ) then
           write(iulog,*) 'flbc_get: Failed to deallocate wrk_zonal, ierr = ',ierr
+          call endrun
+       end if
+    else
+       deallocate(wrk, stat=ierr)
+       if( ierr /= 0 ) then
+          write(iulog,*) 'flbc_get: Failed to deallocate wrk, ierr = ',ierr
           call endrun
        end if
     end if
@@ -653,14 +658,53 @@ contains
     do m = 1,flbc_cnt
        if ( flbcs(m)%spc_ndx > 0 ) then
           n = map( flbcs(m)%spc_ndx )
-          vmr(:ncol,pver,n) = flbcs(m)%vmr(:ncol,lchnk,last) &
-               + dels * (flbcs(m)%vmr(:ncol,lchnk,next) - flbcs(m)%vmr(:ncol,lchnk,last))
+          ! If the GHG happens to be an advected specie, but not a chemical specie
+          ! (e.g., CO2 when the carbon cycle is on in standard CAM), then n=0 and
+          ! we need to skip setting the LBC.
+          if (n > 0) then
+             vmr(:ncol,pver,n) = flbcs(m)%vmr(:ncol,lchnk,last) &
+                + dels * (flbcs(m)%vmr(:ncol,lchnk,next) - flbcs(m)%vmr(:ncol,lchnk,last))
+          end if
        endif
     end do
 
   end subroutine flbc_set
 
+  subroutine flbc_get_cfc11eq( lbc_vmr, ncol, lchnk )
+
+    !--------------------------------------------------------
+    ! return the lower of cfclleq
+    !--------------------------------------------------------
+
+    !--------------------------------------------------------
+    ! dummy arguments
+    !--------------------------------------------------------
+    integer,  intent(in)  ::   ncol
+    integer,  intent(in)  ::   lchnk
+    real(r8), intent(out) ::   lbc_vmr(:)    ! lower bndy concentrations( mol/mol )
+
+    !--------------------------------------------------------
+    !	... local variables
+    !--------------------------------------------------------
+    integer  :: m, last, next
+    real(r8) :: dels
+
+    lbc_vmr(:) = 0._r8
+
+    if (flbc_has_cfc11eq) then
+       call get_dels( dels, last, next )
+       m = ghg_indices(f11eq_ndx)
+       lbc_vmr(:ncol) = flbcs(m)%vmr(:ncol,lchnk,last) &
+            + dels * (flbcs(m)%vmr(:ncol,lchnk,next) - flbcs(m)%vmr(:ncol,lchnk,last))
+    endif
+
+  end subroutine flbc_get_cfc11eq
+
   subroutine get_dels( dels, last, next )
+
+#ifndef WACCM_TSMLT
+    use intp_util, only: findplb
+#endif
 
     implicit none
 
@@ -756,15 +800,18 @@ contains
           ch4vmr = global_mean_vmr(flbcs(ghg_indices(ch4_ndx)), dels, last, next )
      if (ghg_indices(n2o_ndx)>0) &
           n2ovmr = global_mean_vmr(flbcs(ghg_indices(n2o_ndx)), dels, last, next )
-     if (ghg_indices(f11_ndx)>0) &
+     if (ghg_indices(f11_ndx)>0) then
           f11vmr = global_mean_vmr(flbcs(ghg_indices(f11_ndx)), dels, last, next )
+     elseif (ghg_indices(f11eq_ndx)>0) then
+          f11vmr = global_mean_vmr(flbcs(ghg_indices(f11eq_ndx)), dels, last, next )
+     endif
      if (ghg_indices(f12_ndx)>0) &
           f12vmr = global_mean_vmr(flbcs(ghg_indices(f12_ndx)), dels, last, next )
 
   end subroutine flbc_gmean_vmr
 
   function global_mean_vmr( flbcs, dels, last, next  )
-    use phys_gmean, only: gmean
+    use gmean_mod,  only: gmean
     use phys_grid,  only: get_ncols_p
 
     implicit none
@@ -781,7 +828,7 @@ contains
     if (flbcs%has_mean) then
        global_mean_vmr = flbcs%vmr_mean(last) &
             + dels * (flbcs%vmr_mean(next) - flbcs%vmr_mean(last))
-    else 
+    else
        do lchnk = begchunk, endchunk
           ncol = get_ncols_p(lchnk)
           vmr_arr(:ncol,lchnk) = flbcs%vmr(:ncol,lchnk,last) &

@@ -7,6 +7,7 @@
 !  Date...
 !  15 August 2002
 !  11 April  2008
+!  15 December 2014
 !
 !  Programmed by...
 !   Douglas E. Kinnison
@@ -25,20 +26,20 @@
 !   HOCl   + HCl(l)     =>  Cl2  + H2O    (5)    f(T,P,HCl,HOCl,H2O,r)
 !   HOBr   + HCl(l)     =>  BrCl + H2O    (6)    f(T,P,HCl,HOBr,H2O,r)
 !
-! Nitric Acid Di-hydrate Reactions        Rxn#    Gamma   Reference
-!   N2O5   + H2O(s)     =>  2HNO3         (7)     4e-4   JPL06-2
-!   ClONO2 + H2O(s)     =>  HOCl + HNO3   (8)     4e-3   JPL06-2
-!   ClONO2 + HCl(s)     =>  Cl2  + HNO3   (9)     0.2    JPL06-2
-!   HOCl   + HCl(s)     =>  Cl2  + H2O    (10)    0.1    JPL06-2
-!   BrONO2 + H2O(s)     =>  HOBr + HNO3   (11)    0.3    David Hanson PC
+! Nitric Acid Tri-hydrate Reactions       Rxn#    Gamma   Reference
+!   N2O5   + H2O(s)     =>  2HNO3         (7)     4e-4   JPL10-6
+!   ClONO2 + H2O(s)     =>  HOCl + HNO3   (8)     4e-3   JPL10-6
+!   ClONO2 + HCl(s)     =>  Cl2  + HNO3   (9)     0.2    JPL10-6
+!   HOCl   + HCl(s)     =>  Cl2  + H2O    (10)    0.1    JPL10-6
+!   BrONO2 + H2O(s)     =>  HOBr + HNO3   (11)    0.006  Davies et JGR, 2003    
 !
-! ICE Aersol Reactions                    Rxn#    Gamma
-!   N2O5   + H2O(s)     =>  2HNO3         (12)     0.02   JPL06-2
-!   ClONO2 + H2O(s)     =>  HOCl + HNO3   (13)     0.3    JPL06-2
-!   BrONO2 + H2O(s)     =>  HOBr + HNO3   (14)     0.3    JPL06-2
-!   ClONO2 + HCl(s)     =>  Cl2  + HNO3   (15)     0.3    JPL06-2
-!   HOCl   + HCl(s)     =>  Cl2  + H2O    (16)     0.2    JPL06-2
-!   HOBr   + HCl(s)     =>  BrCl + H2O    (17)     0.3    JPL06-2
+! WATER-ICE Aersol Reactions              Rxn#    Gamma
+!   N2O5   + H2O(s)     =>  2HNO3         (12)     0.02   JPL10-6
+!   ClONO2 + H2O(s)     =>  HOCl + HNO3   (13)     0.3    JPL10-6
+!   BrONO2 + H2O(s)     =>  HOBr + HNO3   (14)     0.3    JPL10-6
+!   ClONO2 + HCl(s)     =>  Cl2  + HNO3   (15)     0.3    JPL10-6
+!   HOCl   + HCl(s)     =>  Cl2  + H2O    (16)     0.2    JPL10-6
+!   HOBr   + HCl(s)     =>  BrCl + H2O    (17)     0.3    JPL10-6
 !
 ! NOTE: The rate constants derived from species reacting with H2O are
 !       first order (i.e., sec-1 units) - an example is N2O5 + H2O = 2HNO3.
@@ -50,7 +51,7 @@
 !
 ! NOTE: Liquid Sulfate Aerosols...
 !       See coding for references on how the Sulfate Aerosols were handled.
-!       Data was used that was more recent than JPL00.
+!       Approach follows Shi et al., JGR, 106, D20, 24259, 2001.
 !
 !
 ! INPUT:
@@ -90,8 +91,10 @@
 
         subroutine init_strato_rates
 
-          use mo_chem_utls, only : get_rxt_ndx, get_spc_ndx
-          use mo_aero_settling, only: strat_aer_settl_init
+          use mo_chem_utls,      only : get_rxt_ndx, get_spc_ndx
+          use mo_aero_settling,  only : strat_aer_settl_init
+          use ppgrid,            only : pcols, pver
+
           implicit none
 
           integer :: ids(23)
@@ -133,8 +136,10 @@
 
         endsubroutine init_strato_rates
 
-      subroutine ratecon_sfstrat( ad, pmid, temp, rad_sulfate, sad_sulfate, &
-                                  sad_nat, sad_ice, h2ovmr, vmr, rxt, ncol )
+      subroutine ratecon_sfstrat( ncol, ad, pmid, temp, rad_sulfate, sad_sulfate, &
+                                  sad_nat, sad_ice, h2ovmr, vmr, rxt, &
+                                  gprob_n2o5, gprob_cnt_hcl, gprob_cnt_h2o, gprob_bnt_h2o, &
+                                  gprob_hocl_hcl, gprob_hobr_hcl, wtper  )
 
       use shr_kind_mod, only : r8 => shr_kind_r8
       use chem_mods,    only : adv_mass, rxntot, gas_pcnst
@@ -164,10 +169,19 @@
       real(r8), intent(out) :: &
         rxt(ncol,pver,rxntot)                                     ! rate constants
 
+      real(r8), dimension(ncol,pver), intent(out) :: &            ! diagnostics
+        gprob_n2o5, &
+        gprob_cnt_hcl, &
+        gprob_cnt_h2o, &
+        gprob_bnt_h2o, &
+        gprob_hocl_hcl, &
+        gprob_hobr_hcl, &
+        wtper
+
 !-----------------------------------------------------------------------
 !  	... local variables
 !-----------------------------------------------------------------------
-	real(r8), parameter :: small_conc = 1.e-30_r8
+        real(r8), parameter :: small_div  = 1.e-16_r8      ! for divid by excess species
 	real(r8), parameter :: av_const   = 2.117265e4_r8  ! (8*8.31448*1000 / PI)
 	real(r8), parameter :: pa2mb      = 1.e-2_r8       ! Pa to mb
 	real(r8), parameter :: m2cm       = 100._r8        ! meters to cms
@@ -251,14 +265,11 @@
         Gamma_s_prime, &
         Gamma_b_hcl_prime, &
         Gamma_b, &
-        gprob_n2o5, &
         gprob_rxn, &
         gprob_tot, &
-        gprob_cnt, &
-        gprob_cnt_hcl, &
-        gprob_cnt_h2o
-
-        real(r8) :: &
+        gprob_cnt
+        
+      real(r8) :: &
         D_hocl, &
         k_hocl_hcl, &
         C_hocl, &
@@ -266,13 +277,11 @@
         H_hocl, &
         Gamma_hocl_rxn, &
         rdl_hocl, &
-        f_hocl, &
-        gprob_hocl_hcl
+        f_hocl
 
-        real(r8) :: &
+      real(r8) :: &
         h1, h2, h3, &
-        alpha, &
-        gprob_bnt_h2o
+        alpha
 
       real(r8) :: &
         C_hobr, &
@@ -284,8 +293,7 @@
         H_hobr, &
         rdl_hobr, &
         Gamma_hobr_rxn, &
-        f_hobr, &
-        gprob_hobr_hcl
+        f_hobr
 
       real(r8) :: &
         pmb,&					! Pressure, mbar (hPa)
@@ -305,7 +313,7 @@
       real(r8) :: &
         wrk, tmp
 
-      real(r8), parameter :: small = 1.e-16_r8
+      
 
       if (.not. has_strato_chem) return
 
@@ -330,6 +338,14 @@
          rxt(:,k,rid_het15) = 0._r8
          rxt(:,k,rid_het16) = 0._r8
          rxt(:,k,rid_het17) = 0._r8
+
+         gprob_n2o5(:,k)    = 0._r8
+         gprob_cnt_h2o(:,k) = 0._r8
+         gprob_cnt_hcl(:,k) = 0._r8
+         gprob_bnt_h2o(:,k) = 0._r8
+         gprob_hocl_hcl(:,k)= 0._r8
+         gprob_hobr_hcl(:,k)= 0._r8
+         wtper(:,k)         = 0._r8
       end do
 
 !-----------------------------------------------------------------------
@@ -342,9 +358,9 @@ column_loop : &
 !-----------------------------------------------------------------------
 !	... set species, pmb, and atmos
 !-----------------------------------------------------------------------
-	    brono2vmr = vmr(i,k,id_brono2)
-	    clono2vmr = vmr(i,k,id_clono2)
-	    hclvmr    = vmr(i,k,id_hcl)
+	    brono2vmr    = vmr(i,k,id_brono2)
+	    clono2vmr    = vmr(i,k,id_clono2)
+	    hclvmr       = vmr(i,k,id_hcl)
 	    hoclvmr      = vmr(i,k,id_hocl)
 	    hobrvmr      = vmr(i,k,id_hobr)
 	    if( hclvmr > 0._r8 ) then
@@ -368,7 +384,7 @@ column_loop : &
 
 !-----------------------------------------------------------------------
 !  	... setup for stratospheric aerosols
-!           data range set: 185K - 240K;    GRL, 24, 1931, 1997
+!           data range set: 185K - 240K;    Tabazedeh GRL, 24, 1931, 1997
 !-----------------------------------------------------------------------
             T_limit   = max( temp(i,k),185._r8 )
             T_limit   = min( T_limit,240._r8 )
@@ -407,7 +423,6 @@ has_sadsulf : &
                else
                   pH2O_atm  = 0._r8
                end if
-
 !-----------------------------------------------------------------------
 !     .... Partial Pressure of H2O in hPa
 !-----------------------------------------------------------------------
@@ -467,8 +482,9 @@ has_sadsulf : &
 !     ... h2so4 Weight Percent
 !-----------------------------------------------------------------------
                wt = 9800._r8*m_h2so4 / (98._r8*m_h2so4  + 1000._r8)
+               wtper(i,k) = wt
 !-----------------------------------------------------------------------
-!     .... Parameters for h2so4 Solution, JPL-00
+!     .... Parameters for h2so4 Solution
 !-----------------------------------------------------------------------
 !     ... h2so4 Solution Density (g/cm3)
 !-----------------------------------------------------------------------
@@ -492,14 +508,12 @@ has_sadsulf : &
                term2     = (8515._r8 - 10718._r8*(x_h2so4**.7_r8))*T_limiti
                H_hcl     = term1 * exp( -8.68_r8 + term2 )
                M_hcl     = H_hcl*pHCl_atm
-
 !-----------------------------------------------------------------------
 !     ... h2so4 solution viscosity
 !-----------------------------------------------------------------------
                aconst    = 169.5_r8 + wt*(5.18_r8 - wt*(.0825_r8 - 3.27e-3_r8*wt))
                tzero     = 144.11_r8 + wt*(.166_r8 - wt*(.015_r8 - 2.18e-4_r8*wt))
                vis_h2so4 = aconst/(T_limit**1.43_r8) * exp( 448._r8/(T_limit - tzero) )
-
 !-----------------------------------------------------------------------
 !     ... Acid activity in molarity
 !-----------------------------------------------------------------------
@@ -519,17 +533,15 @@ has_sadsulf : &
 	       end if
 
 	       wrk      = .25_r8*sadsulf
-               rad_sulf = max( rad_sulfate(i,k),1.e-7_r8 )
+               rad_sulf = max( rad_sulfate(i,k),1.e-6_r8 )
 !-----------------------------------------------------------------------
 !     N2O5 + H2O(liq) =>  2.00*HNO3  Sulfate Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( n2o5vmr > small ) then
                   term0 = -25.5265_r8 - wt*(.133188_r8 - wt*(.00930846_r8 - 9.0194e-5_r8*wt))
                   term1 = 9283.76_r8 + wt*(115.345_r8 - wt*(5.19258_r8 - .0483464_r8*wt))
                   term2 = -851801._r8 - wt*(22191.2_r8 - wt*(766.916_r8 - 6.85427_r8*wt))
-                  gprob_n2o5 = exp( term0 + T_limiti*(term1 + term2*T_limiti) )
-                  rxt(i,k,rid_het1) = max( 0._r8,wrk*av_n2o5*gprob_n2o5 )
-               end if
+                  gprob_n2o5(i,k) = exp( term0 + T_limiti*(term1 + term2*T_limiti) )
+                  rxt(i,k,rid_het1) = max( 0._r8,wrk*av_n2o5*gprob_n2o5(i,k) )
 
 !-----------------------------------------------------------------------
 !     ClONO2 + H2O(liq) =  HOCl + HNO3   Sulfate Aerosol Reaction
@@ -538,7 +550,7 @@ has_sadsulf : &
 !-----------------------------------------------------------------------
 !-----------------------------------------------------------------------
 !     	... Radius sulfate set (from sad module)
-!           Set min radius to 0.001 microns (1e-7 cm)
+!           Set min radius to 0.01 microns (1e-6 cm)
 !           Typical radius is 0.1 microns (1e-5 cm)
 !           f_cnt may go negative under if not set.
 !-----------------------------------------------------------------------
@@ -579,21 +591,19 @@ has_sadsulf : &
                      gprob_cnt     = 1._r8 / (1._r8 + term1)
                      term1         = Gamma_s_prime + Gamma_b_hcl_prime
                      term2         = Gamma_s_prime + Gamma_b
-                     gprob_cnt_hcl = gprob_cnt * term1/term2
-                     gprob_cnt_h2o = gprob_cnt - gprob_cnt_hcl
+                     gprob_cnt_hcl(i,k) = gprob_cnt * term1/term2
+                     gprob_cnt_h2o(i,k) = gprob_cnt - gprob_cnt_hcl(i,k)
                   else
-                     gprob_cnt_h2o = 0._r8
-                     gprob_cnt_hcl = 0._r8
+                     gprob_cnt_h2o(i,k) = 0._r8
+                     gprob_cnt_hcl(i,k) = 0._r8
                      Fhcl          = 1._r8
                   end if
-                  if( clono2vmr > small ) then
-                     rxt(i,k,rid_het2) = max( 0._r8,wrk*av_clono2*gprob_cnt_h2o )
-                  end if
+
+                  rxt(i,k,rid_het2) = max( 0._r8,wrk*av_clono2*gprob_cnt_h2o(i,k) )
 
 !-----------------------------------------------------------------------
 !  	... BrONO2 + H2O(liq) =  HOBr + HNO3   Sulfate Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( brono2vmr > small ) then
                   h1    = 29.24_r8
                   h2    = -.396_r8
                   h3    = .114_r8
@@ -601,28 +611,26 @@ has_sadsulf : &
                   gprob_rxn = exp( h1 + h2*wt ) + h3
                   term1     = 1._r8/alpha
                   term2     = 1._r8/gprob_rxn
-                  gprob_bnt_h2o = 1._r8 / (term1 + term2)
-                  rxt(i,k,rid_het3) = max( 0._r8,wrk*av_brono2*gprob_bnt_h2o )
-               end if
+                  gprob_bnt_h2o(i,k) = 1._r8 / (term1 + term2)
+                  rxt(i,k,rid_het3) = max( 0._r8,wrk*av_brono2*gprob_bnt_h2o(i,k) )
 
 !-----------------------------------------------------------------------
 !     	... ClONO2 + HCl(liq) =  Cl2  + HNO3  Sulfate Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( hclvmr > small .and. clono2vmr > small ) then
+               if( hclvmr > small_div .and. clono2vmr > small_div ) then
                  if ( hclvmr > clono2vmr ) then
-                    rxt(i,k,rid_het4) = max( 0._r8,wrk*av_clono2*gprob_cnt_hcl )*hcldeni
+                    rxt(i,k,rid_het4) = max( 0._r8,wrk*av_clono2*gprob_cnt_hcl(i,k) )*hcldeni
                  else
-                    rxt(i,k,rid_het4) = max( 0._r8,wrk*av_clono2*gprob_cnt_hcl )*cntdeni
+                    rxt(i,k,rid_het4) = max( 0._r8,wrk*av_clono2*gprob_cnt_hcl(i,k) )*cntdeni
                  end if
                end if
 
 !-----------------------------------------------------------------------
 !     	... HOCl + HCl(liq) =  Cl2 + H2O   Sulfate Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( hclvmr > small .and. hoclvmr > small ) then
 !-----------------------------------------------------------------------
 !     	... Radius sulfate set (from sad module)
-!           Set min radius to 0.001 microns (1e-7 cm)
+!           Set min radius to 0.01 microns (1e-6 cm)
 !           Typical radius is 0.1 microns (1e-5 cm)
 !           f_hocl may go negative under if not set.
 !-----------------------------------------------------------------------
@@ -642,27 +650,26 @@ has_sadsulf : &
                      f_hocl          = term1 - term2
                      if( f_hocl > 0._r8 ) then
                         term1           = 1._r8 / (f_hocl*Gamma_hocl_rxn*Fhcl)
-                        gprob_hocl_hcl  = 1._r8 / (1._r8 + term1)
+                        gprob_hocl_hcl(i,k)  = 1._r8 / (1._r8 + term1)
                      else
-                        gprob_hocl_hcl  = 0._r8
+                        gprob_hocl_hcl(i,k)  = 0._r8
                      end if
 
-                     if ( hclvmr > hoclvmr ) then
-                       rxt(i,k,rid_het5) = max( 0._r8,wrk*av_hocl*gprob_hocl_hcl )*hcldeni
-                     else
-                       rxt(i,k,rid_het5) = max( 0._r8,wrk*av_hocl*gprob_hocl_hcl )*hocldeni
+                     if( hclvmr > small_div .and. hoclvmr > small_div ) then
+                       if ( hclvmr > hoclvmr ) then
+                         rxt(i,k,rid_het5) = max( 0._r8,wrk*av_hocl*gprob_hocl_hcl(i,k) )*hcldeni
+                       else
+                         rxt(i,k,rid_het5) = max( 0._r8,wrk*av_hocl*gprob_hocl_hcl(i,k) )*hocldeni
+                       end if
                      end if
-
 	          end if
-               end if
 
 !-----------------------------------------------------------------------
 !     	... HOBr + HCl(liq) =  BrCl + H2O  Sulfate Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( hclvmr > small .and. hobrvmr > small ) then
 !-----------------------------------------------------------------------
 !   	... Radius sulfate set (from sad module)
-!           Set min radius to 0.001 microns (1e-7 cm)
+!           Set min radius to 0.01 microns (1e-6 cm)
 !           Typical radius is 0.1 microns (1e-5 cm)
 !           f_hobr may go negative under if not set.
 !-----------------------------------------------------------------------
@@ -671,7 +678,7 @@ has_sadsulf : &
 !-----------------------------------------------------------------------
 !     	...  Taken from Waschewsky and Abbat
 !            Dave Hanson (PC) suggested we divide this rc by eight to agee
-!            with his data (Hanson, in press, 2002).
+!            with his data (Hanson, 108, D8, 4239, JGR, 2003).
 !            k1=k2*Mhcl for gamma(HOBr)
 !-----------------------------------------------------------------------
                   k_wasch         = .125_r8 * exp( .542_r8*wt - 6440._r8*T_limiti + 10.3_r8)
@@ -679,7 +686,7 @@ has_sadsulf : &
 !     	... Taken from Hanson 2002.
 !-----------------------------------------------------------------------
                   H_hobr          = exp( -9.86_r8 + 5427._r8*T_limiti )
-                  k_dl            = 7.5e14_r8*D_hobr*2._r8                        ! or  7.5e14*D *(2nm)
+                  k_dl            = 7.5e14_r8*D_hobr*2._r8                   ! or  7.5e14*D *(2nm)
 !-----------------------------------------------------------------------
 !  	... If k_wasch is GE than the diffusion limit...
 !-----------------------------------------------------------------------
@@ -702,20 +709,20 @@ has_sadsulf : &
                      term2           = rdl_hobr/rad_sulf
                      f_hobr          = term1 - term2
                      if( f_hobr > 0._r8 ) then
-                        term1            = 1._r8 / (f_hobr*Gamma_hobr_rxn)
-                        gprob_hobr_hcl   = 1._r8 / (1._r8 + term1)
+                        term1              = 1._r8 / (f_hobr*Gamma_hobr_rxn)
+                        gprob_hobr_hcl(i,k)= 1._r8 / (1._r8 + term1)
                      else
-                         gprob_hobr_hcl  = 0._r8
+                        gprob_hobr_hcl(i,k)= 0._r8
                      end if
-
-                     if ( hclvmr > hobrvmr ) then
-                        rxt(i,k,rid_het6) = max( 0._r8,wrk*av_hobr*gprob_hobr_hcl )*hcldeni
-                     else
-                        rxt(i,k,rid_het6) = max( 0._r8,wrk*av_hobr*gprob_hobr_hcl )*hobrdeni    
-                     end if           
-
+                     if( hclvmr > small_div .and. hobrvmr > small_div ) then
+                       if ( hclvmr > hobrvmr ) then
+                          rxt(i,k,rid_het6) = max( 0._r8,wrk*av_hobr*gprob_hobr_hcl(i,k) )*hcldeni
+                       else
+                          rxt(i,k,rid_het6) = max( 0._r8,wrk*av_hobr*gprob_hobr_hcl(i,k) )*hobrdeni    
+                       end if           
+                     end if
 		  end if
-               end if
+ 
             end if has_sadsulf
 
 has_sadnat : &
@@ -724,166 +731,152 @@ has_sadnat : &
 !-----------------------------------------------------------------------
 !     	... N2O5 + H2O(s) => 2HNO3  NAT Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( n2o5vmr > small ) then
 !-----------------------------------------------------------------------
-!     ... gprob based on JPL06-2 for NAT.
+!     ... gprob based on JPL10-6 for NAT.
 !         also see Hanson and Ravi, JPC, 97, 2802-2803, 1993.
 !                 gprob_tot     = 4.e-4
 !-----------------------------------------------------------------------
-                  rxt(i,k,rid_het7)  = wrk*av_n2o5*4.e-4_r8
-	       end if
+                rxt(i,k,rid_het7)  = wrk*av_n2o5*4.e-4_r8
 
 !-----------------------------------------------------------------------
 !     ClONO2 + H2O(s) => HNO3 + HOCl  NAT Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( clono2vmr > small ) then
 !-----------------------------------------------------------------------
-!     ... gprob based on JPL06-2 for NAT.
+!     ... gprob based on JPL10-6 for NAT.
 !         also see Hanson and Ravi, JPC, 97, 2802-2803, 1993.
 !                 gprob_tot    = 0.004
 !-----------------------------------------------------------------------
-                  rxt(i,k,rid_het8) = wrk*av_clono2*4.0e-3_r8
-   	       end if
+                rxt(i,k,rid_het8) = wrk*av_clono2*4.0e-3_r8
 
 !-----------------------------------------------------------------------
 !     	... ClONO2 + HCl(s) => HNO3 + Cl2, NAT Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( hclvmr > small ) then
-                  if( clono2vmr > small ) then
 !-----------------------------------------------------------------------
-!     ... gprob based on JPL06-2 for NAT.
+!     ... gprob based on JPL10-6 for NAT.
 !         also see Hanson and Ravi, JPC, 96, 2682-2691, 1992.
 !                 gprob_tot   = 0.2
 !-----------------------------------------------------------------------
-                     if ( hclvmr > clono2vmr ) then
-                        rxt(i,k,rid_het9) = wrk*av_clono2*0.2_r8*hcldeni
-                     else
-                        rxt(i,k,rid_het9) = wrk*av_clono2*0.2_r8*cntdeni  
-                     end if
-                  end if
+                if( hclvmr > small_div .and. clono2vmr > small_div ) then
+                   if ( hclvmr > clono2vmr ) then
+                      rxt(i,k,rid_het9) = wrk*av_clono2*0.2_r8*hcldeni
+                   else
+                      rxt(i,k,rid_het9) = wrk*av_clono2*0.2_r8*cntdeni  
+                   end if
+                end if
 
 !-----------------------------------------------------------------------
 !     	... HOCl + HCl(s) => H2O + Cl2  NAT Aerosol Reaction
 !-----------------------------------------------------------------------
-                  if( hoclvmr > small ) then
 !-----------------------------------------------------------------------
-!     ... gprob based on JPL06-2 for NAT.
+!     ... gprob based on JPL10-6 for NAT.
 !         see Hanson and Ravi, JPC, 96, 2682-2691, 1992.
-!         and      Abbatt and Molina, GRL, 19, 461-464, 1992.
+!         and Abbatt and Molina, GRL, 19, 461-464, 1992.
 !                 gprob_tot   = 0.1
 !-----------------------------------------------------------------------
-                     if ( hclvmr > hoclvmr ) then
-                        rxt(i,k,rid_het10) = wrk*av_hocl*0.1_r8*hcldeni
-                     else
-                        rxt(i,k,rid_het10) = wrk*av_hocl*0.1_r8*hocldeni
-                     end if
-                  end if
+               if( hclvmr > small_div .and. hoclvmr > small_div ) then
+                   if ( hclvmr > hoclvmr ) then
+                      rxt(i,k,rid_het10) = wrk*av_hocl*0.1_r8*hcldeni
+                   else
+                      rxt(i,k,rid_het10) = wrk*av_hocl*0.1_r8*hocldeni
+                   end if
                end if
 
 !-----------------------------------------------------------------------
 !     	... BrONO2 + H2O(s) => HOBr + HNO3  NAT Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( brono2vmr > small ) then
 !-----------------------------------------------------------------------
-!       ... Personel Communication, 11/4/99, David Hanson
-!                 gprob_tot   = 0.3
+!       ... Davies et al., 
+!           JGR, 108, NO. D5, 8322, doi:10.1029/2001JD000445, 2003
+!                 gprob_tot   = 0.006
 !-----------------------------------------------------------------------
-                  rxt(i,k,rid_het11) = wrk*av_brono2*0.3_r8
-               end if
+                  rxt(i,k,rid_het11) = wrk*av_brono2*0.006_r8
+
             end if has_sadnat
 
 has_sadice : &
 	    if( sadice > 0._r8 ) then
-	       wrk = .25_r8*sadice
+	         wrk = .25_r8*sadice
 !-----------------------------------------------------------------------
 !     N2O5 + H2O(s) => 2HNO3  ICE Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( n2o5vmr > small ) then
 !-----------------------------------------------------------------------
-!       ... gprob based on JPL06-2 for ICE.
+!       ... gprob based on JPL10-6 for ICE.
 !           also see Hanson and Ravi, JPC, 97, 2802-2803, 1993.
-!                 gprob_tot    = .02
+!                 gprob_tot    = 0.02
 !-----------------------------------------------------------------------
                   rxt(i,k,rid_het12) = wrk*av_n2o5*0.02_r8
- 	       end if
+
 !-----------------------------------------------------------------------
 !     	... ClONO2 + H2O(s) => HNO3 + HOCl  ICE Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( clono2vmr > small ) then
 !-----------------------------------------------------------------------
-!     	... gprob based on JPL06-2 for ICE.
+!     	... gprob based on JPL10-6 for ICE.
 !     	    also see Hanson and Ravi, JGR, 96, 17307-17314, 1991.
-!                 gprob_tot    = .3
+!                 gprob_tot    = 0.3
 !-----------------------------------------------------------------------
                   rxt(i,k,rid_het13) = wrk*av_clono2*0.3_r8
-	       end if
 
 !-----------------------------------------------------------------------
 !     	... BrONO2 + H2O(s) => HNO3 + HOBr  ICE Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( brono2vmr > small ) then
 !-----------------------------------------------------------------------
-!     	... gprob based on JPL06-2 for ICE.
+!     	... gprob based on JPL10-6 for ICE.
 !           also see Hanson and Ravi, JPC, 97, 2802-2803, 1993.
 !           could be as high as 1.0
-!                 gprob_tot    = .3
+!                 gprob_tot    = 0.3
 !-----------------------------------------------------------------------
                   rxt(i,k,rid_het14) = wrk*av_brono2*0.3_r8
-      	       end if
 
 !-----------------------------------------------------------------------
 !     ClONO2 + HCl(s) => HNO3 + Cl2, ICE Aerosol Reaction
 !-----------------------------------------------------------------------
-               if( hclvmr > small ) then
-                  if( clono2vmr > small ) then
 !-----------------------------------------------------------------------
-!       ... gprob based on JPL06-2 for ICE.
+!       ... gprob based on JPL10-6 for ICE.
 !           also see Hanson and Ravi, GRL, 15, 17-20, 1988.
 !           also see Lue et al.,
-!                 gprob_tot    = .3
+!                 gprob_tot    = 0.3
 !-----------------------------------------------------------------------
+                 if( hclvmr > small_div .and. clono2vmr > small_div ) then
                      if ( hclvmr > clono2vmr ) then
                         rxt(i,k,rid_het15) = wrk*av_clono2*0.3_r8*hcldeni
                      else
                         rxt(i,k,rid_het15) = wrk*av_clono2*0.3_r8*cntdeni
                      end if
-
-                  end if
+                 end if
 !
 !-----------------------------------------------------------------------
 !     	... HOCl + HCl(s) => H2O + Cl2, ICE Aerosol Reaction
 !-----------------------------------------------------------------------
-                  if( hoclvmr > small .and. hclvmr > small ) then
 !-----------------------------------------------------------------------
-!       ... gprob based on JPL06-2 for ICE.
+!       ... gprob based on JPL10-6 for ICE.
 !           also see Hanson and Ravi, JPC, 96, 2682-2691, 1992.
 !           also see Abbatt and Molina, GRL, 19, 461-464, 1992.
-!                 gprob_tot   = .2
+!                 gprob_tot   = 0.2
 !-----------------------------------------------------------------------
+                 if( hoclvmr > small_div .and. hclvmr > small_div ) then
                      if ( hclvmr > hoclvmr ) then
                         rxt(i,k,rid_het16) = wrk*av_hocl*0.2_r8*hcldeni
                      else
                         rxt(i,k,rid_het16) = wrk*av_hocl*0.2_r8*hocldeni
                      end if
-
                   end if
 
 !-----------------------------------------------------------------------
 !     HOBr + HCl(s) => H2O + BrCl, ICE Aerosol Reaction
 !-----------------------------------------------------------------------
-                  if( hobrvmr > small .and. hclvmr > small ) then
 !-----------------------------------------------------------------------
-!       ... gprob based on JPL06-2 for ICE.
+!       ... gprob based on JPL10-6 for ICE.
 !           Abbatt GRL, 21, 665-668, 1994.
-!                    gprob_tot   = .3
+!                    gprob_tot   = 0.3
 !-----------------------------------------------------------------------
-                    if ( hclvmr > hobrvmr ) then
-                       rxt(i,k,rid_het17) = wrk*av_hobr*0.3_r8*hcldeni
-                    else
-                       rxt(i,k,rid_het17) = wrk*av_hobr*0.3_r8*hobrdeni
-                    end if
+                  if( hobrvmr > small_div .and. hclvmr > small_div ) then
+                     if ( hclvmr > hobrvmr ) then
+                        rxt(i,k,rid_het17) = wrk*av_hobr*0.3_r8*hcldeni
+                     else
+                        rxt(i,k,rid_het17) = wrk*av_hobr*0.3_r8*hobrdeni
+                     end if
                   end if
-	       end if
+
             end if has_sadice
          end do column_loop
       end do Level_loop

@@ -3,19 +3,19 @@ module mo_airplane
   !	... Airplane insitu emission sources
   !--------------------------------------------------------------------
 
-  use shr_kind_mod, only : r8 => shr_kind_r8
+  use shr_kind_mod,     only : r8 => shr_kind_r8
   use cam_abortutils,   only : endrun
-  use pio,          only : pio_inq_dimid, pio_inq_dimlen, pio_get_var, &
-       file_desc_t, var_desc_t, pio_inq_vardimid, pio_inq_varndims, pio_nowrite, &
-       pio_inq_varid, pio_closefile
-       
-  use cam_pio_utils,only : cam_pio_openfile
-  use cam_logfile,  only : iulog
+  use pio,              only : pio_inq_dimid, pio_inq_dimlen, pio_get_var, &
+                               file_desc_t, var_desc_t, pio_inq_vardimid, pio_inq_varndims, pio_nowrite, &
+                               pio_inq_varid, pio_closefile
+
+  use cam_pio_utils,    only : cam_pio_openfile
+  use cam_logfile,      only : iulog
   implicit none
 
   private
 
-  save 
+  save
 
   real(r8), allocatable :: &
        pno(:,:,:), &
@@ -37,7 +37,7 @@ contains
     integer, intent(in) :: lchnk, ncol, no_ndx, co_ndx, xno_ndx
     real(r8), intent(in) :: cldtop(:), zint_abs(:,:)
     real(r8), intent(inout) :: extfrc(:,:,:)
-    
+
 
 ! Local Variables
     real(r8), dimension(ncol,pver) :: no_air, co_air
@@ -110,7 +110,7 @@ contains
              end if
           end do long_loop
        end do level_loop
-      
+
     end if
     call outfld( 'NO_Aircraft',  no_air(:ncol,:), ncol, lchnk )
     call outfld( 'CO_Aircraft',  co_air(:ncol,:), ncol, lchnk )
@@ -131,10 +131,10 @@ contains
     use chem_mods,     only : adv_mass
     use ioFileMod,     only : getfil
     use mo_chem_utls,  only : get_spc_ndx, get_extfrc_ndx
-    use phys_grid,     only : get_ncols_p, get_rlat_all_p, get_rlon_all_p, ngcols_p
+    use phys_grid,     only : get_ncols_p, get_rlat_all_p, get_rlon_all_p
     use ppgrid,        only : begchunk, endchunk, pcols
     use mo_constants,  only : pi, d2r, rearth
-    use phys_gmean,    only : gmean
+    use gmean_mod,     only : gmean
     implicit none
 
     !-----------------------------------------------------------------------
@@ -146,7 +146,7 @@ contains
     !	... Local variables
     !-----------------------------------------------------------------------
     real(r8), parameter :: msq2cmsq = 1.e4_r8, zero=0._r8, twopi=2._r8*pi
-    integer  :: ios, k, j
+    integer  :: k
     integer  :: nlat, nlon, nlev, ndims
     integer  :: ierr
     type(file_desc_t) :: piofile
@@ -159,7 +159,7 @@ contains
     real(r8) :: factor
     character(len=256) :: locfn
     integer :: co_ndx, no_ndx
-    type(interp_type) :: lon_wgts, lat_wgts    
+    type(interp_type) :: lon_wgts, lat_wgts
     real(r8) :: to_lats(pcols), to_lons(pcols)
     integer :: ncols, c
 
@@ -168,7 +168,7 @@ contains
 
     if ( co_ndx < 0 .and. no_ndx < 0 ) then
        if( masterproc ) then
-          write(iulog,*) 'airpl_src: NO and CO do not have external source --> no aircraft sources will be applied'      
+          write(iulog,*) 'airpl_src: NO and CO do not have external source --> no aircraft sources will be applied'
        endif
        return
     endif
@@ -300,8 +300,8 @@ contains
        call lininterp_init(lat, nlat, to_lats, ncols, 1, lat_wgts)
 
        do k = 1,nlev
-          call lininterp(pno_in(:,:,k), nlon, nlat, pno(:,k,c), ncols, lon_wgts, lat_wgts) 
-          call lininterp(pco_in(:,:,k), nlon, nlat, pco(:,k,c), ncols, lon_wgts, lat_wgts) 
+          call lininterp(pno_in(:,:,k), nlon, nlat, pno(:,k,c), ncols, lon_wgts, lat_wgts)
+          call lininterp(pco_in(:,:,k), nlon, nlat, pco(:,k,c), ncols, lon_wgts, lat_wgts)
        enddo
        call lininterp_finish(lon_wgts)
        call lininterp_finish(lat_wgts)

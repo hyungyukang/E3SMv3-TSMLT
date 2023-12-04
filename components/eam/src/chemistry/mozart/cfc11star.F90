@@ -1,6 +1,7 @@
 !---------------------------------------------------------------------------------
 ! Manages the CFC11* for radiation 
 !  4 Dec 2009 -- Francis Vitt created
+!  8 Mar 2013 -- expanded for waccm_tsmlt -- fvitt
 !---------------------------------------------------------------------------------
 module cfc11star
 
@@ -8,9 +9,11 @@ module cfc11star
   use cam_logfile,  only : iulog
   
   use physics_buffer, only : pbuf_add_field, dtype_r8
-  use cam_abortutils,   only : endrun
-  use ppgrid,       only : pcols, pver, begchunk, endchunk
-  use spmd_utils,   only : masterproc
+  use ppgrid,         only : pcols, pver, begchunk, endchunk
+  use spmd_utils,     only : masterproc
+  use constituents,   only : cnst_get_ind
+  use mo_chem_utls,   only : get_inv_ndx
+  use mo_flbc,        only : flbc_get_cfc11eq, flbc_has_cfc11eq
 
   implicit none
   save 
@@ -22,18 +25,16 @@ module cfc11star
 
   logical :: do_cfc11star
   character(len=16), parameter :: pbufname = 'CFC11STAR'
-  integer :: pbf_idx
- 
-  integer, pointer :: cfc11_ndx
-  integer, pointer :: cfc113_ndx
-  integer, pointer :: ccl4_ndx
-  integer, pointer :: ch3ccl3_ndx
-  integer, pointer :: hcfc22_ndx
-  integer, pointer :: cf2clbr_ndx
-  integer, pointer :: cf3br_ndx
-  integer, target :: indices(7)
+  integer :: pbf_idx = -1
+  integer, parameter :: ncfcs = 14
+
+  integer :: indices(ncfcs)
+  integer :: inv_indices(ncfcs)
   
-  real(r8) :: rel_rf(7)
+  real(r8) :: rel_rf(ncfcs)
+  character(len=8), parameter :: species(ncfcs) = &
+    (/ 'CFC11   ','CFC113  ','CFC114  ','CFC115  ','CCL4    ','CH3CCL3 ','CH3CL   ','HCFC22  ',&
+       'HCFC141B','HCFC142B','CF2CLBR ','CF3BR   ','H2402   ','HALONS  ' /)
 
 contains
 
@@ -42,53 +43,52 @@ contains
   subroutine register_cfc11star
 
     implicit none
-    
+
+    integer :: m
+
+    real(r8), parameter :: cfc_rf(ncfcs) = &
+      (/  0.25_r8,   0.30_r8,   0.31_r8,   0.18_r8,   0.13_r8,   0.06_r8,   0.01_r8,   0.20_r8,  &
+          0.14_r8,   0.20_r8,   0.30_r8,   0.32_r8,   0.33_r8,   0.25_r8 /) ! W/m2/ppb
+
+    do m = 1, ncfcs 
+!      call cnst_get_ind(species(m), indices(m), abort=.false.)
+       call cnst_get_ind(species(m), indices(m), abrtf=.false.)
+       if (indices(m)<=0) then
+         inv_indices(m)=get_inv_ndx(species(m))
+       end if
+    enddo
+
+    do_cfc11star = (any(indices(:)>0).or.any(inv_indices(:)>0))
+    if (.not.do_cfc11star) return
+
     call pbuf_add_field(pbufname,'global',dtype_r8,(/pcols,pver/),pbf_idx)
+
+    rel_rf(:) = cfc_rf(:) / cfc_rf(1)
 
   endsubroutine register_cfc11star
 
 !---------------------------------------------------------------------------------
 !---------------------------------------------------------------------------------
   subroutine init_cfc11star(pbuf2d)
-    use constituents, only : cnst_get_ind
-    use cam_history,  only : addfld
+    use cam_history,  only : addfld, horiz_only
     use infnan,       only : nan, assignment(=)
     use physics_buffer, only : physics_buffer_desc, pbuf_set_field
 
-    implicit none
-
     real(r8) :: real_nan
-
-    real(r8), parameter :: cfc_rf(7)  =  (/ 0.25_r8, 0.30_r8, 0.13_r8, 0.06_r8, 0.20_r8, 0.30_r8, 0.32_r8 /)    ! W/m2/ppb
     type(physics_buffer_desc), pointer :: pbuf2d(:,:)
-
-    real_nan = nan
-
-    cfc11_ndx   => indices(1)
-    cfc113_ndx  => indices(2)
-    ccl4_ndx    => indices(3)
-    ch3ccl3_ndx => indices(4)
-    hcfc22_ndx  => indices(5)
-    cf2clbr_ndx => indices(6)
-    cf3br_ndx   => indices(7)
-    
-    call cnst_get_ind('CFC11',  cfc11_ndx,   abrtf=.false.)
-    call cnst_get_ind('CFC113', cfc113_ndx,  abrtf=.false.)
-    call cnst_get_ind('CCL4',   ccl4_ndx,    abrtf=.false.)
-    call cnst_get_ind('CH3CCL3',ch3ccl3_ndx, abrtf=.false.)
-    call cnst_get_ind('HCFC22', hcfc22_ndx,  abrtf=.false.)
-    call cnst_get_ind('CF2CLBR',cf2clbr_ndx, abrtf=.false.)
-    call cnst_get_ind('CF3BR',  cf3br_ndx,   abrtf=.false.)
-
-    do_cfc11star = all(indices(:)>0)
 
     if (.not.do_cfc11star) return
 
+    real_nan = nan
     call pbuf_set_field(pbuf2d, pbf_idx, real_nan)
 
-    rel_rf(:) = cfc_rf(:) / cfc_rf(1)
     call addfld(pbufname,(/ 'lev' /),'A','kg/kg','cfc11star for radiation' )
-    
+
+    if (flbc_has_cfc11eq) then
+       call addfld('CFC11STAR0', (/ 'lev' /), 'A','kg/kg','cfc11star for radiation before scaling' )
+       call addfld('CFC11EQ_LBC', horiz_only, 'A','mole/mole','cfc11eq LBC' )
+    endif
+
     if (masterproc) then
        write(iulog,*) 'init_cfc11star: CFC11STAR is added to pbuf2d for radiation'
     endif
@@ -97,9 +97,11 @@ contains
 !---------------------------------------------------------------------------------
 !---------------------------------------------------------------------------------
   subroutine update_cfc11star( pbuf2d, phys_state )
-    use cam_history,  only : outfld
-    use physics_types,only : physics_state
+
+    use cam_history,    only : outfld
+    use physics_types,  only : physics_state
     use physics_buffer, only : physics_buffer_desc, pbuf_get_field, pbuf_get_chunk
+    use tracer_cnst,    only : get_cnst_data_ptr ! returns pointer to 
 
     implicit none
 
@@ -108,8 +110,12 @@ contains
 
 
     integer :: lchnk, ncol
-    integer :: c
+    integer :: c, m, k
     real(r8), pointer :: cf11star(:,:)
+    real(r8), pointer :: cnst_offline(:,:)
+    real(r8) :: cfc11eq_vmr(pcols)
+    real(r8) :: scale_factor(pcols)
+    real(r8), parameter :: vmr2mmr = 137.35_r8/28.97_r8
 
     if (.not.do_cfc11star) return
     
@@ -119,16 +125,32 @@ contains
 
        call pbuf_get_field(pbuf_get_chunk(pbuf2d, lchnk), pbf_idx, cf11star)
 
-       cf11star(:ncol,:) = &
-            phys_state(c)%q(:ncol,:,cfc11_ndx)  * rel_rf(1) + &
-            phys_state(c)%q(:ncol,:,cfc113_ndx) * rel_rf(2) + &
-            phys_state(c)%q(:ncol,:,ccl4_ndx)   * rel_rf(3) + &
-            phys_state(c)%q(:ncol,:,ch3ccl3_ndx)* rel_rf(4) + &
-            phys_state(c)%q(:ncol,:,hcfc22_ndx) * rel_rf(5) + &
-            phys_state(c)%q(:ncol,:,cf2clbr_ndx)* rel_rf(6) + &
-            phys_state(c)%q(:ncol,:,cf3br_ndx)  * rel_rf(7)
+       cf11star(:ncol,:) = 0._r8
+       do m = 1, ncfcs 
+          if ( indices(m)>0 ) then
+             cf11star(:ncol,:) = cf11star(:ncol,:) &
+                               + phys_state(c)%q(:ncol,:,indices(m)) * rel_rf(m) 
+          elseif (inv_indices(m)>0) then
+             call get_cnst_data_ptr( species(m), phys_state(c), cnst_offline, pbuf_get_chunk(pbuf2d, lchnk) )              
+             cf11star(:ncol,:) = cf11star(:ncol,:) &
+                               + cnst_offline(:ncol,:) * rel_rf(m)               
+          endif
+       enddo
 
-       call outfld( pbufname, cf11star(:ncol,:), ncol, lchnk )
+       if (flbc_has_cfc11eq) then
+          call flbc_get_cfc11eq( cfc11eq_vmr, ncol, lchnk )
+
+          call outfld( 'CFC11EQ_LBC', cfc11eq_vmr(:ncol), ncol, lchnk) 
+          call outfld( 'CFC11STAR0', cf11star(:ncol,:), ncol, lchnk) 
+
+          ! scale according to CAM's CFC11_eq
+          scale_factor(:ncol) = (vmr2mmr*cfc11eq_vmr(:ncol))/cf11star(:ncol,pver)
+          do k = 1,pver
+             cf11star(:ncol,k) = scale_factor(:ncol)*cf11star(:ncol,k)
+          enddo
+       endif
+
+       call outfld( pbufname, cf11star(:ncol,:), ncol, lchnk) 
 
     enddo
 

@@ -5,17 +5,17 @@
 !-----------------------------------------------------------------------
 module gas_wetdep_opts
 
-  use constituents, only : pcnst
-  use cam_logfile,  only : iulog
-  use constituents, only : pcnst
-  use spmd_utils,   only : masterproc
+  use constituents,     only : pcnst
+  use cam_logfile,      only : iulog
+  use constituents,     only : pcnst
+  use spmd_utils,       only : masterproc
   use cam_abortutils,   only : endrun
 
   implicit none
 
-  character(len=8) :: gas_wetdep_list(pcnst) = ' '
-  character(len=3) :: gas_wetdep_method = 'MOZ'
-  integer :: gas_wetdep_cnt = 0
+  character(len=16), protected :: gas_wetdep_list(pcnst) = ' '
+  character(len=3), protected :: gas_wetdep_method = 'MOZ'
+  integer,          protected :: gas_wetdep_cnt = 0
 
 contains
 
@@ -24,7 +24,7 @@ contains
 
   subroutine gas_wetdep_readnl(nlfile)
 
-    use cam_abortutils,      only: endrun
+    use cam_abortutils,  only: endrun
     use namelist_utils,  only: find_group_name
     use units,           only: getunit, freeunit
 #ifdef SPMD
@@ -66,7 +66,8 @@ contains
        endif
     enddo
 
-    if (( gas_wetdep_cnt>0 ).and.( .not.(gas_wetdep_method=='MOZ' .or. gas_wetdep_method=='NEU') )) then
+    if (( gas_wetdep_cnt>0 ).and.( .not.(gas_wetdep_method=='MOZ' .or. gas_wetdep_method=='NEU' &
+         .or. gas_wetdep_method=='OFF') )) then
        call endrun('gas_wetdep_readnl; gas_wetdep_method must be set to either MOZ or NEU')
     endif
 

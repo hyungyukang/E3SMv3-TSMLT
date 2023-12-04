@@ -1,8 +1,11 @@
        module mo_jeuv
 
-       use shr_kind_mod, only : r8 => shr_kind_r8
+       use shr_kind_mod,     only : r8 => shr_kind_r8
        use cam_abortutils,   only : endrun
-       use cam_logfile,  only : iulog
+       use cam_logfile,      only : iulog
+       use euvac,            only : euvac_etf
+       use solar_euv_data,   only : solar_euv_data_etf, solar_euv_data_active
+       use spmd_utils,       only : masterproc, masterprocid, mpicom, mpi_real8
 
        implicit none
 
@@ -19,22 +22,28 @@
        integer, parameter :: neuv = 26               ! number of photolysis/ionization reactions
        integer, parameter :: nIonRates = 11          ! number of photo-ionizations rates needed for waccmx
        integer, parameter :: nmaj = 3                ! number of major neutral species (O,O2,N2)
-       integer, parameter :: nspecies = 5            ! number of neutral species(O,N,O2,N2)
+       integer, parameter :: nspecies = 5            ! number of neutral species(O,N,O2,N2,CO2)
        integer, parameter :: nstat = 6               ! maximum number of ionization/dissociation
                                                      ! /excitation states for each speies
-       integer, parameter :: lmax = 23               ! number of wavelength bins in EUV 
-       real(r8), parameter :: heat_eff_fac = .05_r8  ! heating efficiency factor
+       integer, parameter :: lmax = 23               ! number of wavelength bins in EUV
+
+       real(r8), parameter :: heat_eff_fac = .08_r8  ! heating efficiency factor
+       ! Solar EUV direct heating was increased from 5% to 8% to bring it closer to the 
+       ! TIE-GCM value (5% applied twice for a total of 10%) -- Hanli Liu & Stan Solomon
+
        real(r8), parameter :: hc = 6.62608e-34_r8 * 2.9979e8_r8 / 1.e-9_r8
 
-       real(r8) :: d2r
        real(r8) :: sigabs(lmax,nspecies)               ! absorption cross sections of major species
        real(r8) :: branch_p(lmax,nstat,nmaj) = 0._r8   ! branching ratios for photoionization/dissociation
        real(r8) :: branch_e(lmax,nstat,nmaj) = 0._r8   ! branching ratios for photoelectron ionization/dissociation/excitation
        real(r8) :: energy(lmax)                        ! solar energy
 
+       real(r8), pointer :: solar_etf(:)
+       logical :: do_heating(13)
+
        contains
 
-       subroutine jeuv_init (euvacdat_file, photon_file, electron_file, indexer)
+       subroutine jeuv_init (photon_file, electron_file, indexer)
 !==============================================================================
 !   Purpose:
 !      read tabulated data:
@@ -45,15 +54,12 @@
 !           (3) read solar flux
 !==============================================================================
 
-       use physconst,     only : pi
        use units,         only : getunit, freeunit
-       use ppgrid,        only : pver
        use ioFileMod,     only : getfil
        use mo_chem_utls,  only : get_rxt_ndx
 
        implicit none
 
-       character(len=*), intent(in) :: euvacdat_file
        character(len=*), intent(in) :: photon_file
        character(len=*), intent(in) :: electron_file
        integer, optional,intent(inout) :: indexer(:)
@@ -67,258 +73,261 @@
         real(r8) :: waves(lmax)                  ! wavelength array for short bound of bins (A)
         real(r8) :: wavel(lmax)                  ! wavelength array for long bound of bins (A)
         real(r8) :: wc(lmax)                     ! wavelength bin center (nm)
-        real(r8) :: sflux(lmax)                  ! solar flux (photon cm-2 s-1)
-        real(r8) :: dummy                        ! temp variable
         character(len=200) :: str,fmt            ! string for comments in data file
         character(len=256) :: locfn
 
-        integer :: jeuv_1_ndx
+        integer :: jeuv_1_ndx, ierr, jndx
+        character(len=2) :: mstring
+        character(len=7) :: jstring
+        logical :: do_jeuv
 
-        jeuv_1_ndx = get_rxt_ndx( 'jeuv_1' )
-        
-        d2r = pi/180._r8
+        do_jeuv=.false.
+        do_heating=.false.
+
+        do m = 1,neuv
+           write ( mstring, '(I2)' ) m
+           jstring = 'jeuv_'//trim(adjustl(mstring))
+           jndx = get_rxt_ndx( jstring )
+           if (jndx>0) then
+             do_jeuv=.true.
+             indexer(m) = jndx
+           endif
+           if (jndx>0 .and. m<14) then
+             do_heating(m) = .true.
+           endif
+        enddo
+
+        if (.not.do_jeuv) return
+
+        if (solar_euv_data_active) then
+           solar_etf => solar_euv_data_etf
+        else
+           solar_etf => euvac_etf
+        endif
+
+        if ( size(solar_etf) /= lmax ) then 
+           write(iulog,*) 'jeuv_init: the size of solar_etf is incorrect '
+           write(iulog,*) ' ... size(solar_etf) = ',size(solar_etf)
+           write(iulog,*) ' .............. lmax = ',lmax
+           call endrun('jeuv_init: the size of solar_etf is incorrect ')
+        endif
+
 !------------------------------------------------------------------------------
 !       read from data file the absorption cross sections for neutral species,
 !       braching ratios for photoionization/dissociation, and braching ratios 
 !       for photoelectron ionization/dissociation/excitation
 !------------------------------------------------------------------------------
-
-!------------------------------------------------------------------------------
-! read neutral species' absorption cross section and 
-! photoionization/dissociation branching ratio
-!------------------------------------------------------------------------------
-	unit     = getunit()
-        call getfil( photon_file, locfn, 0 )
-        open( unit, file = trim(locfn), status='UNKNOWN', iostat=istat )
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to open ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-!------------------------------------------------------------------------------
-! read O
-!------------------------------------------------------------------------------
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-        fmt = "(f7.2,2x,f7.2,2x,f9.3,4(2x,f7.3))"
-	do i = 1,lmax
-	   read(unit,fmt,iostat=istat) waves(i), wavel(i), sigabs(i,1), (branch_p(i,j,1),j=1,4)
+        master: if (masterproc) then ! read in ascii data only on master task then b-cast 
+           !------------------------------------------------------------------------------
+           ! read neutral species' absorption cross section and 
+           ! photoionization/dissociation branching ratio
+           !------------------------------------------------------------------------------
+           unit = getunit()
+           call getfil( photon_file, locfn, 0 )
+           open( unit, file = trim(locfn), status='UNKNOWN', iostat=istat )
+           if( istat /= 0 ) then
+              write(iulog,*) 'jeuv_init: failed to open ',trim(locfn),'; error = ',istat
+              call endrun
+           end if
+           !------------------------------------------------------------------------------
+           ! read O
+           !------------------------------------------------------------------------------
+           read(unit,*,iostat=istat) str 
            if( istat /= 0 ) then
               write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
               call endrun
            end if
-        end do
-!------------------------------------------------------------------------------
-! read O2
-!------------------------------------------------------------------------------
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	fmt = "(f7.2,2x,f7.2,2x,f9.3,5(2x,f7.3))"
-	do i = 1,lmax
-	   read(unit,fmt,iostat=istat) waves(i), wavel(i), sigabs(i,2), (branch_p(i,j,2),j=1,5)
+           read(unit,*,iostat=istat) str 
            if( istat /= 0 ) then
               write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
               call endrun
            end if
-        end do
-!------------------------------------------------------------------------------
-! read N2
-!------------------------------------------------------------------------------
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	do i = 1,lmax
-	   read(unit,fmt,iostat=istat) waves(i), wavel(i), sigabs(i,3), (branch_p(i,j,3),j=1,5)
+           fmt = "(f7.2,2x,f7.2,2x,f9.3,4(2x,f7.3))"
+           do i = 1,lmax
+              read(unit,fmt,iostat=istat) waves(i), wavel(i), sigabs(i,1), (branch_p(i,j,1),j=1,4)
+              if( istat /= 0 ) then
+                 write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+                 call endrun
+              end if
+           end do
+           !------------------------------------------------------------------------------
+           ! read O2
+           !------------------------------------------------------------------------------
+           read(unit,*,iostat=istat) str 
            if( istat /= 0 ) then
               write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
               call endrun
            end if
-        end do
-!------------------------------------------------------------------------------
-! read N
-!------------------------------------------------------------------------------
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	fmt = "(f7.2,2x,f7.2,2x,f9.3)"
-	do i = 1,lmax
-	   read(unit,fmt,iostat=istat) waves(i), wavel(i), sigabs(i,4)
+           read(unit,*,iostat=istat) str 
            if( istat /= 0 ) then
               write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
               call endrun
            end if
-        end do
-
-!------------------------------------------------------------------------------
-! read CO2
-!------------------------------------------------------------------------------
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	fmt = "(f7.2,2x,f7.2,2x,f9.3)"
-	do i = 1,lmax
-	   read(unit,fmt,iostat=istat) waves(i), wavel(i), sigabs(i,5)
-           if( istat /= 0 ) then
-              write(iulog,*) 'jeuv_init: failed to read CO2 data ',trim(locfn),'; error = ',istat
-              call endrun
-           end if
-        end do
-
-	close( unit )
-
-!------------------------------------------------------------------------------
-! unit transfer for absorption cross sections
-! from Megabarns to cm^2
-!------------------------------------------------------------------------------
-	sigabs(:,:) = sigabs(:,:)*1.e-18_r8
-
-!------------------------------------------------------------------------------
-! read photoelectron ionization/dissociation/excitation branching ratio
-!------------------------------------------------------------------------------
-        call getfil( electron_file, locfn, 0 )
-        open( unit, file = trim(locfn), status='UNKNOWN', iostat=istat )
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to open ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-!------------------------------------------------------------------------------
-! read O
-!------------------------------------------------------------------------------
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	fmt="(f7.2,2x,f7.2,5(2x,f8.3))"
-	do i = 1,lmax
-	   read(unit,fmt,iostat=istat) waves(i), wavel(i), (branch_e(i,j,1),j=1,5)
+           fmt = "(f7.2,2x,f7.2,2x,f9.3,5(2x,f7.3))"
+           do i = 1,lmax
+              read(unit,fmt,iostat=istat) waves(i), wavel(i), sigabs(i,2), (branch_p(i,j,2),j=1,5)
+              if( istat /= 0 ) then
+                 write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+                 call endrun
+              end if
+           end do
+           !------------------------------------------------------------------------------
+           ! read N2
+           !------------------------------------------------------------------------------
+           read(unit,*,iostat=istat) str 
            if( istat /= 0 ) then
               write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
               call endrun
            end if
-        end do
-!------------------------------------------------------------------------------
-! read O2
-!------------------------------------------------------------------------------
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	fmt = "(f7.2,2x,f7.2,6(2x,f8.3))"
-	do i = 1,lmax
-	   read(unit,fmt,iostat=istat) waves(i), wavel(i), (branch_e(i,j,2),j=1,6)
+           read(unit,*,iostat=istat) str 
            if( istat /= 0 ) then
               write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
               call endrun
            end if
-        end do
-!------------------------------------------------------------------------------
-! read N2
-!------------------------------------------------------------------------------
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	do i = 1,lmax
-	   read(unit,fmt,iostat=istat) waves(i), wavel(i), (branch_e(i,j,3),j=1,6)
+           do i = 1,lmax
+              read(unit,fmt,iostat=istat) waves(i), wavel(i), sigabs(i,3), (branch_p(i,j,3),j=1,5)
+              if( istat /= 0 ) then
+                 write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+                 call endrun
+              end if
+           end do
+           !------------------------------------------------------------------------------
+           ! read N
+           !------------------------------------------------------------------------------
+           read(unit,*,iostat=istat) str 
            if( istat /= 0 ) then
               write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
               call endrun
            end if
-        end do
-
-	close( unit )
-
-!------------------------------------------------------------------------------
-! get solar flux
-!------------------------------------------------------------------------------
-        call getfil( euvacdat_file, locfn, 0 )
-        open( unit, file = trim(locfn), status='UNKNOWN', iostat=istat )
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to open ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	read(unit,*,iostat=istat) str 
-        if( istat /= 0 ) then
-           write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
-           call endrun
-        end if
-	do i = 1,lmax
-	   read(unit,*,iostat=istat) waves(i), wavel(i), sflux(i), dummy
+           read(unit,*,iostat=istat) str 
            if( istat /= 0 ) then
               write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
               call endrun
            end if
-        end do
+           fmt = "(f7.2,2x,f7.2,2x,f9.3)"
+           do i = 1,lmax
+              read(unit,fmt,iostat=istat) waves(i), wavel(i), sigabs(i,4)
+              if( istat /= 0 ) then
+                 write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+                 call endrun
+              end if
+           end do
 
-	close( unit )
-	call freeunit( unit )
+           !------------------------------------------------------------------------------
+           ! read CO2
+           !------------------------------------------------------------------------------
+           read(unit,*,iostat=istat) str 
+           if( istat /= 0 ) then
+              write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+              call endrun
+           end if
+           read(unit,*,iostat=istat) str 
+           if( istat /= 0 ) then
+              write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+              call endrun
+           end if
+           fmt = "(f7.2,2x,f7.2,2x,f9.3)"
+           do i = 1,lmax
+              read(unit,fmt,iostat=istat) waves(i), wavel(i), sigabs(i,5)
+              if( istat /= 0 ) then
+                 write(iulog,*) 'jeuv_init: failed to read CO2 data ',trim(locfn),'; error = ',istat
+                 call endrun
+              end if
+           end do
 
-	wc(:)     = .1_r8*(waves(:) + wavel(:))          ! A to nm
+           close( unit )
+
+           !------------------------------------------------------------------------------
+           ! unit transfer for absorption cross sections
+           ! from Megabarns to cm^2
+           !------------------------------------------------------------------------------
+           sigabs(:,:) = sigabs(:,:)*1.e-18_r8
+
+           !------------------------------------------------------------------------------
+           ! read photoelectron ionization/dissociation/excitation branching ratio
+           !------------------------------------------------------------------------------
+           call getfil( electron_file, locfn, 0 )
+           open( unit, file = trim(locfn), status='UNKNOWN', iostat=istat )
+           if( istat /= 0 ) then
+              write(iulog,*) 'jeuv_init: failed to open ',trim(locfn),'; error = ',istat
+              call endrun
+           end if
+           !------------------------------------------------------------------------------
+           ! read O
+           !------------------------------------------------------------------------------
+           read(unit,*,iostat=istat) str 
+           if( istat /= 0 ) then
+              write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+              call endrun
+           end if
+           read(unit,*,iostat=istat) str 
+           if( istat /= 0 ) then
+              write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+              call endrun
+           end if
+           fmt="(f7.2,2x,f7.2,5(2x,f8.3))"
+           do i = 1,lmax
+              read(unit,fmt,iostat=istat) waves(i), wavel(i), (branch_e(i,j,1),j=1,5)
+              if( istat /= 0 ) then
+                 write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+                 call endrun
+              end if
+           end do
+           !------------------------------------------------------------------------------
+           ! read O2
+           !------------------------------------------------------------------------------
+           read(unit,*,iostat=istat) str 
+           if( istat /= 0 ) then
+              write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+              call endrun
+           end if
+           read(unit,*,iostat=istat) str 
+           if( istat /= 0 ) then
+              write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+              call endrun
+           end if
+           fmt = "(f7.2,2x,f7.2,6(2x,f8.3))"
+           do i = 1,lmax
+              read(unit,fmt,iostat=istat) waves(i), wavel(i), (branch_e(i,j,2),j=1,6)
+              if( istat /= 0 ) then
+                 write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+                 call endrun
+              end if
+           end do
+           !------------------------------------------------------------------------------
+           ! read N2
+           !------------------------------------------------------------------------------
+           read(unit,*,iostat=istat) str 
+           if( istat /= 0 ) then
+              write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+              call endrun
+           end if
+           read(unit,*,iostat=istat) str 
+           if( istat /= 0 ) then
+              write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+              call endrun
+           end if
+           do i = 1,lmax
+              read(unit,fmt,iostat=istat) waves(i), wavel(i), (branch_e(i,j,3),j=1,6)
+              if( istat /= 0 ) then
+                 write(iulog,*) 'jeuv_init: failed to read ',trim(locfn),'; error = ',istat
+                 call endrun
+              end if
+           end do
+
+           close( unit )
+
+           call freeunit( unit )
+        end if master
+
+        call mpi_bcast(sigabs,   lmax*nspecies,   mpi_real8, masterprocid, mpicom, ierr)
+        call mpi_bcast(branch_p, lmax*nstat*nmaj, mpi_real8, masterprocid, mpicom, ierr)
+        call mpi_bcast(branch_e, lmax*nstat*nmaj, mpi_real8, masterprocid, mpicom, ierr)
+        call mpi_bcast(waves,    lmax,            mpi_real8, masterprocid, mpicom, ierr)
+        call mpi_bcast(wavel,    lmax,            mpi_real8, masterprocid, mpicom, ierr)
+
+	wc(:)     = .1_r8*(waves(:) + wavel(:))*0.5_r8          ! A to nm
 	energy(:) = heat_eff_fac*hc/wc(:)
-
-        do m = 1,neuv
-           indexer(jeuv_1_ndx+m-1) = m
-        enddo
 
 	end subroutine jeuv_init
 
@@ -376,9 +385,7 @@
 !  N2 + e* --> N (4S) + N (2D) + e*               ! J25
 !==============================================================================
 
-        use euvac,       only : euvac_etf
         use mo_jshort,   only : sphers, slant_col
-        use cam_history, only : outfld
 
 	implicit none
 
@@ -435,7 +442,7 @@
            wrk(:) = scol(k,:)
            tau(:) = matmul( sigabs(:,:nmaj),wrk )
            where( tau(:) < 20._r8 )
-	      nflux(k,:) = euvac_etf(:) * exp( -tau(:) )
+	      nflux(k,:) = solar_etf(:) * exp( -tau(:) )
            elsewhere
 	      nflux(k,:) = 0._r8
            endwhere
@@ -491,7 +498,7 @@
        prates(:,25) = p_electron(:,5,3)
        prates(:,26) = p_photon(:,1,5) 
  
-      do m = 1,neuv
+       do m = 1,neuv
           euv_prates(:,m) = prates(nlev:1:-1,m)
        enddo
 
@@ -538,7 +545,6 @@
 !  N2 + hv --> N (4S) + N (2D)                    ! J13
 !==============================================================================
 
-        use euvac,         only : euvac_etf
         use mo_jshort,     only : sphers, slant_col
         use physconst,     only : avogad
 
@@ -574,7 +580,6 @@
 	real(r8) :: prates(kbot,13)         ! working photorates array
 	real(r8) :: wrk(nmaj)               ! temporary array for photoabsorption rate
 	real(r8) :: absorp(kbot,lmax)       ! temporary array for photoabsorption rate
-	real(r8) :: ioniz(kbot,lmax)        ! temporary array for photoionization rate
 	real(r8) :: dsdh(0:nlev,nlev)       ! Slant path of direct beam through each layer 
 	                                    ! crossed  when travelling from the top of the atmosphere 
 				            ! to layer i; dsdh(i,j), i = 0..NZ-1, j = 1..NZ-1
@@ -603,7 +608,7 @@
            wrk(:) = scol(k1,:)
            tau(:) = matmul( sigabs(:,:nmaj),wrk )
            where( tau(:) < 20._r8 )
-	      nflux(k,:) = energy(:) * euvac_etf(:) * exp( -tau(:) )
+	      nflux(k,:) = energy(:) * solar_etf(:) * exp( -tau(:) )
            elsewhere
 	      nflux(k,:) = 0._r8
            endwhere
@@ -626,20 +631,24 @@
         end do
 
 !------------------------------------------------------------------------------
-! set photolysis rate
+! use photolysis rates to compute heating rates
+! only EUV photolysis reactions in the mechanism contribute to heating
 !------------------------------------------------------------------------------
-       prates(:,1)  = p_photon(:,2,1)
-       prates(:,2)  = p_photon(:,3,1)
-       prates(:,3)  = p_photon(:,4,1)
-       prates(:,5)  = p_photon(:,2,2) + p_photon(:,3,2)
-       prates(:,6)  = p_photon(:,2,3) + p_photon(:,3,3)
-       prates(:,7)  = .54_r8*p_photon(:,4,2)
-       prates(:,8)  = .24_r8*p_photon(:,4,2)
-       prates(:,9)  = .22_r8*p_photon(:,4,2)
-       prates(:,10) = .2_r8*p_photon(:,4,3)
-       prates(:,11) = .8_r8*p_photon(:,4,3)
-       prates(:,12) = p_photon(:,5,2)
-       prates(:,13) = p_photon(:,5,3)
+       prates = 0._r8
+
+       if (do_heating(1)) prates(:,1)  = p_photon(:,2,1)
+       if (do_heating(2)) prates(:,2)  = p_photon(:,3,1)
+       if (do_heating(3)) prates(:,3)  = p_photon(:,4,1)
+
+       if (do_heating(5)) prates(:,5)  = p_photon(:,2,2) + p_photon(:,3,2)
+       if (do_heating(6)) prates(:,6)  = p_photon(:,2,3) + p_photon(:,3,3)
+       if (do_heating(7)) prates(:,7)  = .54_r8*p_photon(:,4,2)
+       if (do_heating(8)) prates(:,8)  = .24_r8*p_photon(:,4,2)
+       if (do_heating(9)) prates(:,9)  = .22_r8*p_photon(:,4,2)
+       if (do_heating(10)) prates(:,10) = .2_r8*p_photon(:,4,3)
+       if (do_heating(11)) prates(:,11) = .8_r8*p_photon(:,4,3)
+       if (do_heating(12)) prates(:,12) = p_photon(:,5,2)
+       if (do_heating(13)) prates(:,13) = p_photon(:,5,3)
        hfactor(:)   = avogad/(cparg(:kbot)*mw(:kbot))
        euv_hrates(kbot+1:nlev) = 0._r8
        euv_hrates(:kbot) = ((prates(kbot:1:-1,1) + prates(kbot:1:-1,2) + prates(kbot:1:-1,3))*o_vmr(:kbot) &

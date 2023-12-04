@@ -4,11 +4,11 @@
 !-------------------------------------------------------------------
 module prescribed_ghg
 
-  use shr_kind_mod, only : r8 => shr_kind_r8
+  use shr_kind_mod,     only : r8 => shr_kind_r8
   use cam_abortutils,   only : endrun
-  use spmd_utils,   only : masterproc
-  use tracer_data,  only : trfld, trfile
-  use cam_logfile,  only : iulog
+  use spmd_utils,       only : masterproc
+  use tracer_data,      only : trfld, trfile
+  use cam_logfile,      only : iulog
 
   implicit none
   private
@@ -30,7 +30,7 @@ module prescribed_ghg
   integer, parameter, public :: N_GHG = 5
   integer :: number_flds
 
-  character(len=256) :: filename = ''
+  character(len=256) :: filename = 'NONE'
   character(len=256) :: filelist = ''
   character(len=256) :: datapath = ''
   character(len=32)  :: datatype = 'SERIAL'
@@ -135,7 +135,7 @@ subroutine prescribed_ghg_readnl(nlfile)
    fixed_tod  = prescribed_ghg_fixed_tod
 
    ! Turn on prescribed volcanics if user has specified an input dataset.
-   if (len_trim(filename) > 0 ) has_prescribed_ghg = .true.
+   if (len_trim(filename) > 0 .and. filename.ne.'NONE') has_prescribed_ghg = .true.
 
 end subroutine prescribed_ghg_readnl
 
@@ -160,10 +160,6 @@ end subroutine prescribed_ghg_readnl
 
     use tracer_data, only : trcdata_init
     use cam_history, only : addfld
-    use ppgrid,      only : pver
-    use error_messages, only: handle_err
-    use ppgrid,         only: pcols, pver, begchunk, endchunk
-    use physics_buffer, only : physics_buffer_desc
 
     implicit none
 

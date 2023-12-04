@@ -11,23 +11,20 @@
 
 ! !USES:
    use shr_kind_mod,    only:  r8 => shr_kind_r8
-   use cam_logfile,     only:  iulog
    use chem_mods,       only:  gas_pcnst
-   use modal_aero_data, only:  maxd_aspectype
+   use modal_aero_data, only:  nspec_max
 
   implicit none
   private
   save
 
 ! !PUBLIC MEMBER FUNCTIONS:
-  public :: modal_aero_coag_sub, modal_aero_coag_init, getcoags_wrapper_f
+  public modal_aero_coag_sub, modal_aero_coag_init
 
 ! !PUBLIC DATA MEMBERS:
   integer, parameter :: pcnstxx = gas_pcnst
 
-#if ( defined MODAL_AERO_9MODE || defined MODAL_AERO_7MODE || defined MODAL_AERO_4MODE || defined MODAL_AERO_4MODE_MOM )
-  integer, parameter, public :: pair_option_acoag = 3
-#elif (defined MODAL_AERO_5MODE)
+#if ( defined MODAL_AERO_7MODE || defined MODAL_AERO_4MODE || defined MODAL_AERO_5MODE || defined WACCM_TSMLT)
   integer, parameter, public :: pair_option_acoag = 3
 #elif ( defined MODAL_AERO_3MODE )
   integer, parameter, public :: pair_option_acoag = 1
@@ -40,15 +37,18 @@
 ! other -- do no coag
 
   integer, parameter, public :: maxpair_acoag = 10
-  integer, parameter, public :: maxspec_acoag = maxd_aspectype
+  integer, protected, public :: maxspec_acoag != nspec_max
 
-  integer, public :: npair_acoag
-  integer, public :: modefrm_acoag(maxpair_acoag)
-  integer, public :: modetoo_acoag(maxpair_acoag)
-  integer, public :: modetooeff_acoag(maxpair_acoag)
-  integer, public :: nspecfrm_acoag(maxpair_acoag)
-  integer, public :: lspecfrm_acoag(maxspec_acoag,maxpair_acoag)
-  integer, public :: lspectoo_acoag(maxspec_acoag,maxpair_acoag)
+  integer, protected, public :: npair_acoag
+  integer, protected, public :: modefrm_acoag(maxpair_acoag)
+  integer, protected, public :: modetoo_acoag(maxpair_acoag)
+  integer, protected, public :: modetooeff_acoag(maxpair_acoag)
+  integer, protected, public :: nspecfrm_acoag(maxpair_acoag)
+  integer, allocatable, protected, public :: lspecfrm_acoag(:,:)
+  integer, allocatable, protected, public :: lspectoo_acoag(:,:)
+  
+  integer :: ip_aitacc, ip_aitpca, ip_pcaacc
+  real(r8), allocatable :: fac_m2v_aitage(:), fac_m2v_pcarbon(:)
 
 ! !DESCRIPTION: This module implements ...
 !
@@ -86,8 +86,7 @@
 ! !USES:
    use mo_constants,     only: pi
    use modal_aero_data
-   use modal_aero_gasaerexch, only:  n_so4_monolayers_pcage, &
-                                     soa_equivso4_factor
+   use modal_aero_gasaerexch, only:  n_so4_monolayers_pcage
 
    use cam_abortutils,   only: endrun
    use cam_history,      only: outfld, fieldname_len
@@ -140,11 +139,11 @@
 !BOC
 
 ! local variables
-	integer :: i, iok, ipair, ip_aitacc, ip_aitpca, ip_pcaacc, iq
+        integer :: i, ipair, iq
 	integer :: idomode(ntot_amode), iselfcoagdone(ntot_amode)
-	integer :: jfreqcoag
+	integer :: jfreqcoag, jsoa
 	integer :: k
-	integer :: l, l1, l2, la, lmz, lsfrm, lstoo, lunout
+	integer :: l, l2, lmz, lsfrm, lstoo, lunout
 	integer :: modefrm, modetoo, mait, macc, mpca
 	integer ::  n, nfreqcoag
 
@@ -158,18 +157,15 @@
 	real(r8) :: aircon
       	real(r8) :: deltat, deltatinv_main
       	real(r8) :: dr_so4_monolayers_pcage
-	real(r8) :: dryvol_a(pcols,pver,ntot_amode)
       	real(r8) :: dumexp, dumloss, dumprod
 	real(r8) :: dumsfc_frm_old, dumsfc_frm_new
 	real(r8) :: dum_m2v
-	real(r8) :: fac_m2v_aitage(maxd_aspectype), fac_m2v_pcarbon(maxd_aspectype)
 	real(r8) :: fac_volsfc_pcarbon
 	real(r8) :: lnsg_frm, lnsg_too
 	real(r8) :: sg_frm, sg_too
 	real(r8) :: tmpa, tmpb, tmpc, tmpf, tmpg, tmph, tmpn
 	real(r8) :: tmp1, tmp2
 	real(r8) :: tmp_qold
-	real(r8) :: v2ncur_a_tmp
 	real(r8) :: vol_core, vol_shell
 	real(r8) :: wetdens_frm, wetdens_too, wetdgnum_frm, wetdgnum_too
 	real(r8) :: xbetaij0, xbetaij2i, xbetaij2j, xbetaij3, &
@@ -185,7 +181,6 @@
                                              ! tendencies are computed for
 	real(r8) :: qsrflx(pcols)
 
-        character(len=fieldname_len)   :: tmpname
         character(len=fieldname_len+3) :: fieldname
 
 ! begin
@@ -212,7 +207,7 @@
 	dotend(:) = .false.
 	dqdt(1:ncol,:,:) = 0.0_r8
 
-	lunout = iulog
+	lunout = 6
 
 
 !
@@ -245,48 +240,10 @@
 	mait = modeptr_aitken
 	mpca = modeptr_pcarbon
 
-	fac_m2v_aitage(:) = 0.0_r8
-	fac_m2v_pcarbon(:) = 0.0_r8
-	if (pair_option_acoag == 3) then
-!   following ipair definitions MUST BE CONSISTENT with
-!   the coding in modal_aero_coag_init for pair_option_acoag == 3
-	    ip_aitacc = 1
-	    ip_pcaacc = 2
-	    ip_aitpca = 3
-
+        if (mpca > 0 .and. mpca <= ntot_amode) then
 	! use 1 mol (bi-)sulfate = 65 cm^3 --> 1 molecule = (4.76e-10 m)^3
 	    dr_so4_monolayers_pcage = n_so4_monolayers_pcage * 4.76e-10_r8
-
-	    ipair = ip_aitpca
-	    do iq = 1, nspecfrm_acoag(ipair)
-		lsfrm = lspecfrm_acoag(iq,ipair)
-		if (lsfrm == lptr_so4_a_amode(mait)) then
-		    fac_m2v_aitage(iq) = specmw_so4_amode / specdens_so4_amode
-		else if (lsfrm == lptr_nh4_a_amode(mait)) then
-		    fac_m2v_aitage(iq) = specmw_nh4_amode / specdens_nh4_amode
-		else if (lsfrm == lptr_soa_a_amode(mait)) then
-		    fac_m2v_aitage(iq) = soa_equivso4_factor*   &
-                                        (specmw_soa_amode / specdens_soa_amode)
-!   for soa, the soa_equivso4_factor converts the soa volume into an
-!	so4(+nh4) volume that has same hygroscopicity contribution as soa
-!   this allows aging calculations to be done in terms of the amount
-!	of (equivalent) so4(+nh4) in the shell
-!   (see modal_aero_gasaerexch)
-		end if
-	    end do
-	    
-	    do l = 1, nspec_amode(mpca)
-		l2 = lspectype_amode(l,mpca)
-!   fac_m2v converts (kmol-AP/kmol-air) to (m3-AP/kmol-air)
-!		[m3-AP/kmol-AP]    = [kg-AP/kmol-AP]  / [kg-AP/m3-AP]
-		fac_m2v_pcarbon(l) = specmw_amode(l2) / specdens_amode(l2)
-	    end do
-
 	    fac_volsfc_pcarbon = exp( 2.5_r8*(alnsg_amode(mpca)**2) )
-	else
-	    ip_aitacc = -999888777
-	    ip_pcaacc = -999888777
-	    ip_aitpca = -999888777
 	end if
 
 !
@@ -760,10 +717,11 @@ main_ipair2: do ipair = 1, npair_acoag
 !
 	use modal_aero_data
 	use modal_aero_gasaerexch, only:  &
-		modefrm_pcage, nspecfrm_pcage, lspecfrm_pcage, lspectoo_pcage
+		modefrm_pcage, nspecfrm_pcage, lspecfrm_pcage, lspectoo_pcage, &
+                soa_equivso4_factor
 
-	use cam_abortutils,      only: endrun
-	use cam_history,     only: addfld, horiz_only, add_default, fieldname_len
+	use cam_abortutils,  only: endrun
+	use cam_history,     only: addfld, add_default, fieldname_len, horiz_only
 	use constituents,    only: pcnst, cnst_name
 	use spmd_utils,      only: masterproc
         use phys_control,    only: phys_getopts
@@ -772,9 +730,10 @@ main_ipair2: do ipair = 1, npair_acoag
 
 !   local variables
 	integer :: ipair, iq, iqfrm, iqfrm_aa, iqtoo, iqtoo_aa
-	integer :: l, lsfrm, lstoo, lunout
-	integer :: m, mfrm, mtoo, mtef
-	integer :: nsamefrm, nsametoo, nspec
+        integer :: jsoa
+	integer :: l, l1, l2, lsfrm, lstoo, lunout
+	integer :: m, mait, mpca, mfrm, mtoo, mtef
+	integer :: nchfrm, nchfrmskip, nchtoo, nchtooskip, nspec
 
 	character(len=fieldname_len)   :: tmpname
 	character(len=fieldname_len+3) :: fieldname
@@ -784,11 +743,19 @@ main_ipair2: do ipair = 1, npair_acoag
 	logical :: dotend(pcnst)
         logical :: history_aerosol      ! Output the MAM aerosol tendencies
  
+	character(len=200) :: msg
+
         !-----------------------------------------------------------------------     
     
         call phys_getopts( history_aerosol_out        = history_aerosol   )
 
-	lunout = iulog
+        lunout = 6
+
+        maxspec_acoag = nspec_max
+        allocate( lspecfrm_acoag(maxspec_acoag,maxpair_acoag) )
+        allocate( lspectoo_acoag(maxspec_acoag,maxpair_acoag) )
+        allocate( fac_m2v_aitage(nspec_max), fac_m2v_pcarbon(nspec_max) )
+
 !
 !   define "from mode" and "to mode" for each coagulation pairing
 !	currently just a2-->a1 coagulation
@@ -818,9 +785,9 @@ main_ipair2: do ipair = 1, npair_acoag
 	    modetoo_acoag(3) = modeptr_pcarbon
 	    modetooeff_acoag(3) = modeptr_accum
 	    if (modefrm_pcage <= 0) then
-		write(iulog,*) '*** modal_aero_coag_init error'
-		write(iulog,*) '    pair_option_acoag, modefrm_pcage mismatch'
-		write(iulog,*) '    pair_option_acoag, modefrm_pcage =', &
+		write(*,*) '*** modal_aero_coag_init error'
+		write(*,*) '    pair_option_acoag, modefrm_pcage mismatch'
+		write(*,*) '    pair_option_acoag, modefrm_pcage =', &
 		    pair_option_acoag, modefrm_pcage
 		call endrun( 'modal_aero_coag_init error' )
 	    end if
@@ -841,48 +808,47 @@ aa_ipair: do ipair = 1, npair_acoag
 	if ( (mfrm < 1) .or. (mfrm > ntot_amode) .or.   &
 	     (mtoo < 1) .or. (mtoo > ntot_amode) .or.   &
 	     (mtef < 1) .or. (mtef > ntot_amode) ) then
-	    write(iulog,*) '*** modal_aero_coag_init error'
-	    write(iulog,*) '    ipair, ntot_amode =', ipair, ntot_amode
-	    write(iulog,*) '    mfrm, mtoo, mtef  =', mfrm, mtoo, mtef
+	    write(*,*) '*** modal_aero_coag_init error'
+	    write(*,*) '    ipair, ntot_amode =', ipair, ntot_amode
+	    write(*,*) '    mfrm, mtoo, mtef  =', mfrm, mtoo, mtef
 	    call endrun( 'modal_aero_coag_init error' )
 	end if
 
 
 	mtoo = mtef   ! effective modetoo
+	if (mfrm < 10) then
+	    nchfrmskip = 1
+	else if (mfrm < 100) then
+	    nchfrmskip = 2
+	else
+	    nchfrmskip = 3
+	end if
+	if (mtoo < 10) then
+	    nchtooskip = 1
+	else if (mtoo < 100) then
+	    nchtooskip = 2
+	else
+	    nchtooskip = 3
+	end if
+
 	nspec = 0
 aa_iqfrm: do iqfrm = 1, nspec_amode(mfrm)
 	    lsfrm = lmassptr_amode(iqfrm,mfrm)
 	    if ((lsfrm .lt. 1) .or. (lsfrm .gt. pcnst)) cycle aa_iqfrm
-
+	    nchfrm = len( trim( cnst_name(lsfrm) ) ) - nchfrmskip
 ! find "too" species having same lspectype_amode as the "frm" species
-! several species in a mode may have the same lspectype_amode, so also
-!    use the ordering as a criterion (e.g., 1st <--> 1st, 2nd <--> 2nd)
-	    iqfrm_aa = 1
-	    iqtoo_aa = 1
-	    if (iqfrm .gt. nspec_amode(mfrm)) then
-		iqfrm_aa = nspec_amode(mfrm) + 1
-		iqtoo_aa = nspec_amode(mtoo) + 1
-	    end if
-	    nsamefrm = 0
-	    do iq = iqfrm_aa, iqfrm
-		if ( lspectype_amode(iq   ,mfrm) .eq.   &
-      		     lspectype_amode(iqfrm,mfrm) ) then
-		    nsamefrm = nsamefrm + 1
-		end if
-	    end do
-	    nsametoo = 0
-	    lstoo = 0
-	    do iqtoo = iqtoo_aa, nspec_amode(mtoo)
-		if ( lspectype_amode(iqtoo,mtoo) .eq.   &
-      		     lspectype_amode(iqfrm,mfrm) ) then
-		    nsametoo = nsametoo + 1
-		    if (nsametoo .eq. nsamefrm) then
-			lstoo = lmassptr_amode(iqtoo,mtoo)
-			exit
-		    end if
-		end if
+! AND same cnst_name (except for last 1/2/3 characters which are the mode index)
+	    do iqtoo = 1, nspec_amode(mtoo)
+              lstoo = lmassptr_amode(iqtoo,mtoo)
+              nchtoo = len( trim( cnst_name(lstoo) ) ) - nchtooskip
+              if (cnst_name(lsfrm)(1:nchfrm) == cnst_name(lstoo)(1:nchtoo)) then
+                 exit
+              else
+                 lstoo = 0
+              end if
 	    end do
 
+	    if ((lstoo < 1) .or. (lstoo > pcnst)) lstoo = 0
 	    nspec = nspec + 1
 	    lspecfrm_acoag(nspec,ipair) = lsfrm
 	    lspectoo_acoag(nspec,ipair) = lstoo
@@ -935,6 +901,71 @@ aa_iqfrm: do iqfrm = 1, nspec_amode(mfrm)
 9330	format( 5x, 'spec', i3, '=', a, ' ---> spec', i3, '=', a )
 9340	format( 5x, 'spec', i3, '=', a, ' ---> LOSS' )
 
+!   set following variables that are used in modal_aero_coag_subr
+!
+	fac_m2v_aitage(:) = 0.0_r8
+	fac_m2v_pcarbon(:) = 0.0_r8
+	if (pair_option_acoag == 3) then
+!   following ipair definitions MUST BE CONSISTENT with
+!   the coding in modal_aero_coag_init for pair_option_acoag == 3
+	    ip_aitacc = 1
+	    ip_pcaacc = 2
+	    ip_aitpca = 3
+
+	    mait = modeptr_aitken
+	    mpca = modeptr_pcarbon
+
+	    ipair = ip_aitpca
+	    do iq = 1, nspecfrm_acoag(ipair)
+		lsfrm = lspecfrm_acoag(iq,ipair)
+		l2 = -1
+		do l1 = 1, nspec_amode(mait)
+		   if (lmassptr_amode(l1,mait) == lsfrm) then
+                      l2 = l1
+			exit
+		   end if
+		end do
+		if (l2 <= 0) then
+		    write( msg, '(a,5(1x,i12))' ) &
+			'modal_aero_coag_init error a001 for ipair, iq, lsfrm', &
+			ipair, iq, lsfrm
+		    call endrun( msg )
+		end if
+		if (lsfrm == lptr_so4_a_amode(mait)) then
+!		    fac_m2v_aitage(iq) = specmw_amode(l2) / specdens_amode(l2) 
+                   fac_m2v_aitage(iq) = specmw_amode(l1,mait) / specdens_amode(l1,mait)
+		else if (lsfrm == lptr_nh4_a_amode(mait)) then
+!                   fac_m2v_aitage(iq) = specmw_amode(l2) / specdens_amode(l2)
+                    fac_m2v_aitage(iq) = specmw_amode(l1,mait) / specdens_amode(l1,mait)
+		else 
+		    do jsoa = 1, nsoa
+			if (lsfrm == lptr2_soa_a_amode(mait,jsoa)) then
+			    fac_m2v_aitage(iq) = soa_equivso4_factor(jsoa)*   &
+                                 !(specmw_amode(l2) / specdens_amode(l2))
+                                 (specmw_amode(l1,mait) / specdens_amode(l1,mait))
+			end if
+!   for soa, the soa_equivso4_factor converts the soa volume into an
+!	so4(+nh4) volume that has same hygroscopicity contribution as soa
+!   this allows aging calculations to be done in terms of the amount
+!	of (equivalent) so4(+nh4) in the shell
+!   (see modal_aero_gasaerexch)
+		    end do
+		end if
+	    end do
+	    
+	    do l = 1, nspec_amode(mpca)
+!B		l2 = lspectype_amode(l,mpca)
+!   fac_m2v converts (kmol-AP/kmol-air) to (m3-AP/kmol-air)
+!		[m3-AP/kmol-AP]    = [kg-AP/kmol-AP]  / [kg-AP/m3-AP]
+!		fac_m2v_pcarbon(l) = specmw_amode(l2) / specdens_amode(l2)
+                fac_m2v_pcarbon(l) = specmw_amode(l,mpca) / specdens_amode(l,mpca)
+	    end do
+
+	else
+	    ip_aitacc = -999888777
+	    ip_pcaacc = -999888777
+	    ip_aitpca = -999888777
+	end if
 
 !
 !   create history file column-tendency fields
@@ -986,11 +1017,9 @@ aa_iqfrm: do iqfrm = 1, nspec_amode(mfrm)
             if ( history_aerosol ) then 
                call add_default( fieldname, 1, ' ' )
 	    endif
-	    if ( masterproc ) write(iulog,'(3(a,2x))') &
+	    if ( masterproc ) write(*,'(3(a,2x))') &
 		'modal_aero_coag_init addfld', fieldname, unit
 	end do ! l = ...
-	if ( masterproc ) write(iulog,'(a)') &
-		'modal_aero_coag_init ALL DONE'
 
 
 	return

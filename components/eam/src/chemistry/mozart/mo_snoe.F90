@@ -16,12 +16,12 @@
 !  DRM 4/03
 !----------------------------------------------------------------------
 
-      use shr_kind_mod, only : r8 => shr_kind_r8
-      use ppgrid,       only : pcols
-      use physconst,    only : pi
-      use mo_constants, only : r2d, d2r
+      use shr_kind_mod,     only : r8 => shr_kind_r8
+      use ppgrid,           only : pcols
+      use physconst,        only : pi
+      use mo_constants,     only : r2d, d2r
       use cam_abortutils,   only : endrun
-      use cam_logfile,  only : iulog
+      use cam_logfile,      only : iulog
 
       implicit none
 
@@ -82,6 +82,7 @@
 !----------------------------------------------------------------------
 !	... do we have no with a fixed ubc ?
 !----------------------------------------------------------------------
+!     call cnst_get_ind( 'NO', ndx_no, abort=.false. )
       call cnst_get_ind( 'NO', ndx_no, abrtf=.false. )
       if( ndx_no > 0 ) then
          if( .not. cnst_fixed_ubc(ndx_no) ) then
@@ -258,8 +259,7 @@ column_loop : &
 !           data returned is three dimensional (on geographic coordinates)
 !----------------------------------------------------------------------
 
-      use time_manager, only : is_first_step, is_first_restart_step, &
-                               is_end_curr_day, get_curr_calday
+      use time_manager, only : get_curr_calday
       use ppgrid,       only : pcols, begchunk, endchunk
       use phys_grid,    only : get_ncols_p
       use spmd_utils,   only : masterproc
@@ -280,34 +280,32 @@ column_loop : &
       real(r8)                 :: doy                ! day of year
       real(r8), allocatable    :: zm(:,:)            ! zonal mean nitric oxide distribution (molecules/cm^3)
 
-      if( is_first_step() .or. is_first_restart_step() .or. is_end_curr_day() ) then
-         allocate( zm(nmlat,nlev),stat=astat )
-         if( astat /= 0 ) then
-            write(iulog,*) 'snoe_3d: failed to allocate zm; error = ',astat
-	    call endrun
-         end if
-         doy = aint( get_curr_calday() )
-#ifdef SNOE_DIAGS
-         if( masterproc ) then
-	    write(iulog,*) ' '
-	    write(iulog,*) 'set_snoe_no: doy,kp,f107 = ',doy,kp,f107
-	    write(iulog,*) ' '
-         end if
-#endif
-!----------------------------------------------------------------------
-!	... obtain SNOE zonal mean data in geomagnetic coordinates
-!----------------------------------------------------------------------
-         call snoe_zm( doy, kp, f107, zm )
-
-!----------------------------------------------------------------------
-!	... map mean to model longitudes
-!----------------------------------------------------------------------
-         do c = begchunk,endchunk
-            ncol = get_ncols_p( c )
-            call snoe_zmto3d( c, ncol, zm, nmlat, nlev )
-         end do
-         deallocate( zm )
+      allocate( zm(nmlat,nlev),stat=astat )
+      if( astat /= 0 ) then
+         write(iulog,*) 'snoe_3d: failed to allocate zm; error = ',astat
+         call endrun
       end if
+      doy = aint( get_curr_calday() )
+#ifdef SNOE_DIAGS
+      if( masterproc ) then
+         write(iulog,*) ' '
+         write(iulog,*) 'set_snoe_no: doy,kp,f107 = ',doy,kp,f107
+         write(iulog,*) ' '
+      end if
+#endif
+      !----------------------------------------------------------------------
+      ! ... obtain SNOE zonal mean data in geomagnetic coordinates
+      !----------------------------------------------------------------------
+      call snoe_zm( doy, kp, f107, zm )
+
+      !----------------------------------------------------------------------
+      ! ... map mean to model longitudes
+      !----------------------------------------------------------------------
+      do c = begchunk,endchunk
+         ncol = get_ncols_p( c )
+         call snoe_zmto3d( c, ncol, zm, nmlat, nlev )
+      end do
+      deallocate( zm )
 
       end subroutine snoe_timestep_init
 

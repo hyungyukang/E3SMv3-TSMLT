@@ -11,8 +11,7 @@ module spehox
 ! solar proton ionization.
 !
 ! !USES
-  use shr_kind_mod, only: r8 => shr_kind_r8,r4 => shr_kind_r4
-  use cam_abortutils,   only: endrun
+  use shr_kind_mod,     only: r8 => shr_kind_r8
 
   implicit none
 
@@ -104,7 +103,7 @@ contains
 !----------------------------------------------------------------------- 
   function hox_prod_factor( ion_pairs, zmid )
 
-    use ppgrid,  only : pcols, pver
+    use ppgrid,  only : pver
     ! for each level interpolate the factor table
 
     implicit none
@@ -138,7 +137,7 @@ contains
     integer, intent(inout) :: lastk
     real(r8) :: interp_factor_tbl
 
-    integer :: i,j
+    integer :: i
     real(r8) :: logp
     real(r8) :: atlwgt1,atlwgt2
     real(r8) :: prodwgt1,prodwgt2

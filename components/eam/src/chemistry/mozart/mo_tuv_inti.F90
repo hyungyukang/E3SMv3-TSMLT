@@ -39,30 +39,30 @@ contains
     !   10/2000  similified by xuexi
     !-----------------------------------------------------------------------------
 
-    use spmd_utils,    only : masterproc
-    use cam_logfile,   only : iulog
+    use spmd_utils,        only : masterproc
+    use cam_logfile,       only : iulog
     use cam_abortutils,    only : endrun
-    use mo_params,     only : kj, kw, smallest, largest
-    use mo_waveall,    only : r01g1, r01g2, r01g3, r01g4, &
-         r04g, r08g, r06g1, r06g2, &
-         r10g1, r10g2, r10g3, r10g4, r10g5, &
-         r11g, r11g1, r11g2, r11g3, r11g4, &
-         r14g, r14g1, r14g2, &
-         r15g, r15g1, r15g2, r15g3, &
-         r17g, r17g1, &
-         r18g, r18g2
-    use mo_wavelab,    only : sj
-    use mo_wavelen,    only : nw, deltaw, delw_bin, sflx, wc, wl, wu
-    use mo_waveo3,     only : xso3, s226, s263, s298
-    use mo_zadj,       only : adj_coeffs
-    use mo_schu,       only : schu_inti
-    use mo_xsections,  only : r44_inti, r08_inti
-    use chem_mods,     only : phtcnt, pht_alias_lst, rxt_tag_lst
-    use ioFileMod,     only : getfil
-    use cam_pio_utils, only : cam_pio_openfile
-    use pio,           only : file_desc_t, pio_nowrite, pio_closefile, &
-         pio_inq_dimid, pio_inq_varid, pio_inq_dimlen, pio_get_var, &
-         pio_seterrorhandling, pio_bcast_error, pio_internal_error, pio_noerr
+    use mo_params,         only : kj, kw, smallest, largest
+    use mo_waveall,        only : r01g1, r01g2, r01g3, r01g4, &
+                                  r04g, r08g, r06g1, r06g2, &
+                                  r10g1, r10g2, r10g3, r10g4, r10g5, &
+                                  r11g, r11g1, r11g2, r11g3, r11g4, &
+                                  r14g, r14g1, r14g2, &
+                                  r15g, r15g1, r15g2, r15g3, &
+                                  r17g, r17g1, &
+                                  r18g, r18g2
+    use mo_wavelab,        only : sj
+    use mo_wavelen,        only : nw, deltaw, delw_bin, sflx, wc, wl, wu
+    use mo_waveo3,         only : xso3, s226, s263, s298
+    use mo_zadj,           only : adj_coeffs
+    use mo_schu,           only : schu_inti
+    use mo_xsections,      only : r44_inti, r08_inti
+    use chem_mods,         only : phtcnt, pht_alias_lst, rxt_tag_lst
+    use ioFileMod,         only : getfil
+    use cam_pio_utils,     only : cam_pio_openfile
+    use pio,               only : file_desc_t, pio_nowrite, pio_closefile, &
+                                  pio_inq_dimid, pio_inq_varid, pio_inq_dimlen, pio_get_var, &
+                                  pio_seterrorhandling, pio_bcast_error, pio_internal_error, pio_noerr
     implicit none
 
     !-----------------------------------------------------------------------------

@@ -25,11 +25,13 @@ module mo_sethet
   integer :: spc_so2_ndx
   integer :: spc_sogm_ndx, spc_sogi_ndx, spc_sogt_ndx, spc_sogb_ndx, spc_sogx_ndx
 
+! HGKANG ---
+! integer :: alknit_ndx
+! HGKANG ---
+
   integer :: alkooh_ndx, mekooh_ndx, tolooh_ndx, terpooh_ndx, ch3cooh_ndx
   integer :: so2_ndx, soa_ndx, so4_ndx, cb2_ndx, oc2_ndx, nh3_ndx, nh4no3_ndx, &
              sa1_ndx, sa2_ndx, sa3_ndx, sa4_ndx, nh4_ndx, h2so4_ndx
-  integer :: soag0_ndx, soag15_ndx, soag24_ndx, soag31_ndx
-  integer :: soag32_ndx, soag33_ndx, soag34_ndx, soag35_ndx
   integer :: xisopno3_ndx,xho2no2_ndx,xonitr_ndx,xhno3_ndx,xonit_ndx
   integer :: clono2_ndx, brono2_ndx, hcl_ndx, n2o5_ndx, hocl_ndx, hobr_ndx, hbr_ndx 
   integer :: ch3cn_ndx, hcn_ndx, hcooh_ndx
@@ -47,8 +49,8 @@ contains
     !       ... intialize the wet removal rate constants routine
     !-----------------------------------------------------------------------      
 
-    use mo_chem_utls, only : get_het_ndx, get_spc_ndx
-    use spmd_utils,   only : masterproc
+    use mo_chem_utls,     only : get_het_ndx, get_spc_ndx
+    use spmd_utils,       only : masterproc
     use cam_abortutils,   only : endrun
 
     integer :: k, m
@@ -60,6 +62,7 @@ contains
 
     allocate( wetdep_map(gas_wetdep_cnt))
 
+
     do k=1,gas_wetdep_cnt
        m = get_het_ndx( trim(gas_wetdep_list(k))) 
        if (m>0) then
@@ -67,7 +70,13 @@ contains
        else
           call endrun('sethet_inti: cannot map '//trim(gas_wetdep_list(k)))
        endif
+       if ( masterproc ) then
+       write(*,*) 'AAAA',k,m, gas_wetdep_cnt,trim(gas_wetdep_list(k)), wetdep_map(k)
+       endif
     enddo
+
+! HGKANG ---
+!   alknit_ndx = get_het_ndx( 'ALKNIT' )
 
     xisopno3_ndx = get_het_ndx( 'XISOPNO3' )
     xho2no2_ndx  = get_het_ndx( 'XHO2NO2' )
@@ -139,18 +148,9 @@ contains
     ch3cn_ndx   = get_het_ndx( 'CH3CN' )
     hcn_ndx     = get_het_ndx( 'HCN' )
     hcooh_ndx   = get_het_ndx( 'HCOOH' )
-    soag0_ndx   = get_het_ndx( 'SOAG0' )
-    soag15_ndx  = get_het_ndx( 'SOAG15' )
-    soag24_ndx  = get_het_ndx( 'SOAG24' )
-    soag31_ndx  = get_het_ndx( 'SOAG31' )
-    soag32_ndx  = get_het_ndx( 'SOAG32' )
-    soag33_ndx  = get_het_ndx( 'SOAG33' )
-    soag34_ndx  = get_het_ndx( 'SOAG34' )
-    soag35_ndx  = get_het_ndx( 'SOAG35' )
 
     if (masterproc) then
        write(iulog,*) 'sethet_inti: new ndx ',so2_ndx,soa_ndx,so4_ndx,cb2_ndx,oc2_ndx, &
-            soag0_ndx,soag15_ndx,soag24_ndx,soag31_ndx,soag32_ndx,soag33_ndx,soag34_ndx,soag35_ndx, &
             nh3_ndx,nh4no3_ndx,sa1_ndx,sa2_ndx,sa3_ndx,sa4_ndx
        write(iulog,*) ' '
        write(iulog,*) 'sethet_inti: diagnotics '
@@ -170,12 +170,12 @@ contains
     !       ... compute rainout loss rates (1/s)
     !-----------------------------------------------------------------------      
 
-    use physconst,    only : rga,pi
-    use chem_mods,    only : gas_pcnst
-    use ppgrid,       only : pver, pcols
-    use phys_grid,    only : get_rlat_all_p
+    use physconst,        only : rga,pi
+    use chem_mods,        only : gas_pcnst
+    use ppgrid,           only : pver, pcols
+    use phys_grid,        only : get_rlat_all_p
     use cam_abortutils,   only : endrun
-    use mo_constants, only : avo => avogadro, boltz_cgs
+    use mo_constants,     only : avo => avogadro, boltz_cgs
 
     implicit none
     !-----------------------------------------------------------------------      
@@ -436,6 +436,7 @@ contains
        !       ch3cocho, hoch2cho (betterton and hoffman, environ. sci. technol., 1988)
        !       ch3cho (staudinger and roberts, crit. rev. sci. technol., 1996)
        !       mvk, macr (allen et al., environ. toxicol. chem., 1998)
+       !       soag_bg(0-4), soag_ff_bb(0-4) (Hodzic et al., 2014)
        !-----------------------------------------------------------------
        xk0(:)             = 2.1e5_r8 *exp( 8700._r8*work1(:) )
        xhen_hno3(:,k)     = xk0(:) * ( 1._r8 + hno3_diss / xph0 )
@@ -679,30 +680,6 @@ contains
           if( ch3ooh_ndx > 0 ) then
              het_rates(i,k,ch3ooh_ndx)  = work3(i)
           end if
-          if( soag0_ndx > 0 ) then
-             het_rates(i,k,soag0_ndx)  = work3(i)
-          endif
-          if( soag15_ndx > 0 ) then
-             het_rates(i,k,soag15_ndx)  = work3(i)
-          endif
-          if( soag24_ndx > 0 ) then
-             het_rates(i,k,soag24_ndx)  = work3(i)
-          endif
-          if( soag31_ndx > 0 ) then
-             het_rates(i,k,soag31_ndx)  = work3(i)
-          endif
-          if( soag32_ndx > 0 ) then
-             het_rates(i,k,soag32_ndx)  = work3(i)
-          endif
-          if( soag33_ndx > 0 ) then
-             het_rates(i,k,soag33_ndx)  = work3(i)
-          endif
-          if( soag34_ndx > 0 ) then
-             het_rates(i,k,soag34_ndx)  = work3(i)
-          endif
-          if( soag35_ndx > 0 ) then
-             het_rates(i,k,soag35_ndx)  = work3(i)
-          endif
           if( pooh_ndx > 0 ) then
              het_rates(i,k,pooh_ndx)  = work3(i)
           end if
@@ -721,6 +698,9 @@ contains
           if( c2h5oh_ndx > 0 ) then
              het_rates(i,k,c2h5oh_ndx) = work3(i)
           end if
+!         if( alknit_ndx  > 0 ) then
+!            het_rates(i,k,alknit_ndx) = work3(i)
+!         end if
           if( alkooh_ndx  > 0 ) then
              het_rates(i,k,alkooh_ndx) = work3(i)
           end if
@@ -842,7 +822,6 @@ contains
           if( hbr_ndx > 0 ) then
              het_rates(i,k, hbr_ndx) = work3(i)
           end if
-
           if( soa_ndx > 0 ) then
              het_rates(i,k,soa_ndx) = tmp1_rates(i)
           end if
@@ -880,7 +859,6 @@ contains
           if( nh3_ndx > 0 ) then
              het_rates(i,k,nh3_ndx) = max( rain(i,k) / (h2o_mol*(work1(i) + 1._r8/(xhen_nh3(i,k)*work2(i)))),0._r8 )
           end if
-
           if( ch3cooh_ndx > 0 ) then
              het_rates(i,k,ch3cooh_ndx) = max( rain(i,k) / (h2o_mol*(work1(i) + 1._r8/(xhen_ch3cooh(i,k)*work2(i)))),0._r8 )
           end if

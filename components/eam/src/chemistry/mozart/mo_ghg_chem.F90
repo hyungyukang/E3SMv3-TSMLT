@@ -9,7 +9,7 @@ module mo_ghg_chem
   use shr_kind_mod,   only : r8 => shr_kind_r8
   use boundarydata,   only : boundarydata_type, boundarydata_init, boundarydata_update
   use physics_types,  only : physics_state
-  use cam_abortutils,     only : endrun
+  use cam_abortutils, only : endrun
   use ppgrid,         only : pcols, pver, begchunk, endchunk
 
   implicit none
@@ -89,9 +89,9 @@ contains
 
     call addfld( 'GHG_CFC11_R', (/ 'lev' /), 'I', '1/sec', 'prescribed cfc11 loss rate for ghg chem' )
     call addfld( 'GHG_CFC12_R', (/ 'lev' /), 'I', '1/sec', 'prescribed cfc12 loss rate for ghg chem' )
-    call addfld( 'GHG_N2O_R', (/ 'lev' /), 'I',   '1/sec', 'prescribed n2o loss rate for ghg chem' )
-    call addfld( 'GHG_CH4_R', (/ 'lev' /), 'I',   '1/sec', 'prescribed ch4 loss rate for ghg chem' )
-    call addfld( 'GHG_H2O_R', (/ 'lev' /), 'I',   '1/sec', 'prescribed h2o loss rate for ghg chem' )
+    call addfld( 'GHG_N2O_R',   (/ 'lev' /), 'I', '1/sec', 'prescribed n2o loss rate for ghg chem' )
+    call addfld( 'GHG_CH4_R',   (/ 'lev' /), 'I', '1/sec', 'prescribed ch4 loss rate for ghg chem' )
+    call addfld( 'GHG_H2O_R',   (/ 'lev' /), 'I', '1/sec', 'prescribed h2o loss rate for ghg chem' )
 
     ghg_ndx =       (/  n2o_ndx,  ch4_ndx, cfc11_ndx, cfc12_ndx /)
     ghg_bnd_names = (/ 'N2OVMR', 'CH4VMR',  'F11VMR',  'F12VMR' /)
@@ -115,7 +115,6 @@ contains
 !-----------------------------------------------------------------
   subroutine ghg_chem_set_rates( rxn_rates, latmapback, zen_angle, ncol, lchnk )
     use chem_mods,    only : rxntot
-    use chem_mods,    only : gas_pcnst
     use cam_history,  only : outfld
     use mo_constants, only : pi
 
@@ -147,7 +146,7 @@ contains
     call outfld( 'GHG_CFC11_R', rxn_rates(:ncol,:,cfc11_rxt), ncol, lchnk )
     call outfld( 'GHG_CFC12_R', rxn_rates(:ncol,:,cfc12_rxt), ncol, lchnk )
     call outfld( 'GHG_N2O_R',   rxn_rates(:ncol,:,n2o_rxt),   ncol, lchnk )
-    call outfld( 'GHG_CH4_R',   rxn_rates(:ncol,:,n2o_rxt),   ncol, lchnk )
+    call outfld( 'GHG_CH4_R',   rxn_rates(:ncol,:,ch4_rxt),   ncol, lchnk )
     
     if (lyman_alpha_rxt > 0) then
        rxn_rates(:ncol,:,lyman_alpha_rxt) = 0._r8 

@@ -27,12 +27,12 @@ contains
     !        ... Set the invariant densities (molecules/cm**3)
     !-----------------------------------------------------------------
 
-    use shr_kind_mod, only : r8 => shr_kind_r8
-    use ppgrid,       only : pver, pcols
-    use chem_mods,    only : adv_mass, gas_pcnst
-    use physconst,    only : mwdry                   ! molecular weight of dry air
+    use shr_kind_mod,     only : r8 => shr_kind_r8
+    use ppgrid,           only : pver, pcols
+    use chem_mods,        only : adv_mass, gas_pcnst
+    use physconst,        only : mwdry                   ! molecular weight of dry air
     use cam_abortutils,   only : endrun
-    use phys_control, only : waccmx_is               !WACCM-X runtime switch
+    use phys_control,     only : waccmx_is               !WACCM-X runtime switch
 
     implicit none
 
@@ -60,11 +60,11 @@ contains
     !-------------------------------------------
     !  Mean mass not fixed for WACCM-X
     !-------------------------------------------
-    if ( waccmx_is('ionosphere') .or. waccmx_is('neutral') ) then
+!   if ( waccmx_is('ionosphere') .or. waccmx_is('neutral') ) then
       fixed_mbar = .false.
-    else
-      fixed_mbar = .true.
-    endif
+!   else
+!     fixed_mbar = .true.
+!   endif
 
     if( fixed_mbar ) then
        !-----------------------------------------------------------------

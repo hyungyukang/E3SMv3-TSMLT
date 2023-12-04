@@ -14,55 +14,25 @@
       public  :: sad_inti
       public  :: sad_strat_calc
       public  :: sad_top
-      public  :: sad_setopts
-      public  :: sad_defaultopts
 
       save
 
       real(r8), parameter :: four_thrd = 4._r8/3._r8
-      real(r8), parameter :: one_thrd = 1._r8/3._r8
-      real(r8), parameter :: two_thrd = 2._r8/3._r8
-      real(r8), parameter :: four_pi  = 4._r8*pi
+      real(r8), parameter :: one_thrd  = 1._r8/3._r8
+      real(r8), parameter :: two_thrd  = 2._r8/3._r8
+      real(r8), parameter :: four_pi   = 4._r8*pi
 
       integer :: sad_top
       integer :: sad_topp
 
-      logical :: rad_feedback = .false.
-      integer :: h2so4_ndx
-      integer :: h2so4_r_g_ndx  !index to geometric mean radius of wet sulfuric aerosol
-
     contains
         
-      subroutine sad_defaultopts( strat_aero_feedback_out )
-        implicit none
-        logical, intent(out), optional :: strat_aero_feedback_out
-
-        if ( present(strat_aero_feedback_out) ) then
-           strat_aero_feedback_out = rad_feedback
-        endif
-
-      end subroutine sad_defaultopts
-
-      subroutine sad_setopts( strat_aero_feedback_in )
-        use physics_buffer, only : pbuf_add_field, dtype_r8
-        implicit none
-        logical, intent(in), optional :: strat_aero_feedback_in
-
-        if ( present(strat_aero_feedback_in) ) then
-           rad_feedback = strat_aero_feedback_in
-        endif
-        if ( rad_feedback ) then
-           call pbuf_add_field('H2SO4M',         'global',dtype_r8,(/pcols,pver/), h2so4_ndx) 
-           call pbuf_add_field('VOLC_RAD_GEOM' , 'global',dtype_r8,(/pcols,pver/), h2so4_r_g_ndx) 
-        endif
-      end subroutine sad_setopts
 
       subroutine sad_inti(pbuf2d)
 !----------------------------------------------------------------------
 !     ... initialize the sad module
 !----------------------------------------------------------------------
 
-      use time_manager, only : is_first_step
       use ref_pres,     only : pref_mid_norm
       use cam_history,  only : addfld
       use physics_buffer, only : physics_buffer_desc, pbuf_set_field
@@ -75,7 +45,6 @@
 !	... Local variables
 !---------------------------------------------------------------------- 
       integer  ::  k
-
 
 !---------------------------------------------------------------------- 
 !	... find level where etamids are all > 1 hPa
@@ -93,20 +62,7 @@
          write(iulog,*) '          whose midpoint is ',pref_mid_norm(sad_topp)*1.e3_r8,' hPa'
       endif
 
-      if (rad_feedback .and. is_first_step()) then
-         call pbuf_set_field(pbuf2d, h2so4_ndx,  0.0_r8)
-         call pbuf_set_field(pbuf2d, h2so4_r_g_ndx,  1.0_r8)
-      endif
-
       call addfld( 'H2SO4M_C',   (/ 'lev' /), 'I',  'ug/m3', 'chemical sulfate aerosol mass' )
-
-      if ( rad_feedback ) then
-         call addfld( 'SAD_SULFR', (/ 'lev' /), 'I', 'cm2/cm3', 'radiative sulfate aerosol SAD' )
-         call addfld( 'RAD_SULFR',      (/ 'lev' /), 'I', 'cm', 'radiative sad sulfate' )
-         call addfld( 'H2SO4MMR',    (/ 'lev' /), 'I',  'kg/kg', 'radiative sulfate aerosol mmr' )
-         call addfld( 'H2SO4M_R',   (/ 'lev' /), 'I',  'ug/m3', 'radiative sulfate aerosol mass' )
-         call addfld( 'VOLC_RAD_GEOM',    (/ 'lev' /), 'I', 'm', 'geometric mean radius of wet aerosol')
-      endif
 
       end subroutine sad_inti
 !===============================================================================
@@ -124,18 +80,20 @@
 !   Modified by 
 !     Doug Kinnison
 !     1 September 2004; Condensed phase H2O passed in from CAM
-!     2 November 2004; New treatment of denitrificatoin (NAT)
-!    14 November 2004; STS mode of operation.
-!    27 March    2008; Using original NAT approach.
-!    08 November 2010; STS Approach (HNO3 => STS; then HNO3 => NAT) 
-!    24 March    2011; updated mask logic and removed sm NAT logic
-!    14 April    2011; update EQUIL logic
+!     2 November  2004; New treatment of denitrificatoin (NAT)
+!    14 November  2004; STS mode of operation.
+!    27 March     2008; Using original NAT approach.
+!    08 November  2010; STS Approach (HNO3 => STS; then HNO3 => NAT) 
+!    24 March     2011; updated mask logic and removed sm NAT logic
+!    14 April     2011; updated EQUIL logic
+!    19 December  2012; updated using Wegner et al., JGR, 2013a,b.
+!    25 April     2013; Removed volcanic heating logic.
 !
 ! DESCRIPTION
 !
 !     This routine has the logic to derive the surface area density for
-!     three types of aerosols: Sulfate; Nitric Acid Trihydrate (NAT);
-!     and ICE. The surface area density is stored in sad_strat(3). The
+!     three types of aerosols: Sulfate (LBS, STS); Nitric Acid Trihydrate (NAT);
+!     and Water-ICE. The surface area density is stored in sad_strat(3). The
 !     first, second, and third dimensions are SULFATE, NAT, and ICE SAD
 !     respectively. The effective radius of each particle is also stored
 !     in radius_strat(3).
@@ -146,15 +104,46 @@
 !     see Binkowski et al., JGR, 100, 26191-26209, 1995. The Volume Density
 !     is substituted into the SAD equation so that the SAD is dependent on
 !     the # of particles cm-3, the width of the distribution (sigma), and
-!     the volume density of the aerosol. 
+!     the volume density of the aerosol. This approach is discussed in 
+!     Considine et al., 2000 and Kinnison et al., 2007.
 !
 !     NOTE2: For the ternary solution calculation
 !     the total sulfate mass is derived from the SAGEII SAD data. This approach
 !     has been previously used in Considine et al., JGR, 1999. The thermodynamic
-!     models used in this routine are from A. Tabazedeh.
+!     models used in this routine are from A. Tabazedeh et al, 1994.
 !
-!     NOTE3:  The number density of the NAT and ICE particles are is set to 0.1
-!     Particle cm-3. 
+!     NOTE3: Updates to the PSC scheme is discussed in Wegner et al., 2013a. 
+!     80% of the total HNO3 is allowed to see STS, 20% NAT. The number density of 
+!     the NAT and ICE particles are is set to 0.01 and 0.1 particle cm-3 respectively. 
+!
+!     NOTE4: The HCl solubility (in STS) has been added and evalutede in Wegner et al., 2013b. 
+!     This solubility is based on Carslaw et al., 1995.
+!
+!     REFERENCES for this PSC module:
+!        Considine, D. B., A. R. Douglass, P. S. Connell, D. E. Kinnison, and D. A., Rotman, 
+!          A polar stratospheric cloud parameterization for the three dimensional model of 
+!          the global modeling initiative and its response to stratospheric aircraft, 
+!          J. Geophys. Res., 105, 3955-3975, 2000.
+!
+!        Kinnison, D. E.,et al., Sensitivity of chemical tracers to meteorological 
+!          parameters in the MOZART-3 chemical transport model, J. Geophys. Res., 
+!          112, D20302, doi:10.1029/2006JD007879, 2007.
+!
+!        Wegner, T, D. E. Kinnison, R. R. Garcia, S. Madronich, S. Solomon, and M. von Hobe, 
+!          On the depletion of HCl in the Antarctic polar vortex, 
+!          in review J. Geophys. Res., 2013.
+!
+!        Wegner, T, D. E. Kinnison, R. R. Garcia, S. Madronich, and S. Solomon, 
+!          Polar Stratospheric Clouds in SD-WACCM4, in review J. Geophys. Res., 2013.
+!
+!        Tabazedeh, A., R. P. Turco, K. Drdla, M. Z. Jacobson, and O. B, Toon, A study
+!          of the type I polar stratosphere cloud formation, 
+!          Geophys. Res. Lett., 21, 1619-1622, 1994.
+!
+!        Carslaw, K. S., S. L. Clegg, and P. Brimblecombe, A thermodynamic model of the
+!          system HCl-HNO3-H2SO4-H2O, including solubilities of HBr, from <200 to 328K, 
+!          J. Phys. Chem., 99, 11,557-11,574, doi:1021/100029a039, 1995.
+!
 !
 ! ARGUMENTS
 !   INPUT:
@@ -164,6 +153,9 @@
 !     h2o_cond		Water condensed phase           (mole fraction)
 !     h2o_gas           Water gas-phase abundance       (mole fraction)
 !
+!     hcl_gas           HCL gas-phase abundance         (mole fraction)
+!     hcl_cond          HCl condensed phase (STS)       (mole fraction)
+!
 !     sage_sad		SAGEII surface area density     (cm2-aer cm-3 atm)
 !     m                 Airdensity                      (molecules cm-3)
 !     press             Pressure                        (hPa)
@@ -171,22 +163,28 @@
 !
 !   OUTPUT:
 !
-!	hno3_gas     = Gas-phase HNO3             Used in chemical solver. 
-!       hno3_cond(1) = Condensed HNO3 from STS    Not used in mo_aero_settling.F90
-!       hno3_cond(2) = Condensed HNO3 from NAT    Used in mo_aero_settling.F90
+!     hno3_gas     = Gas-phase HNO3             Used in chemical solver. 
+!     hno3_cond(1) = Condensed HNO3 from STS    Not used in mo_aero_settling.F90
+!     hno3_cond(2) = Condensed HNO3 from NAT    Used in mo_aero_settling.F90
 !
-!       SAD_strat(1) = Sulfate Aerosol... Used in mo_strato_rates.F90
-!       SAD_strat(2) = NAT Aerosol....    Used in mo_strato_rates.F90
-!       SAD_strat(3) = Water-Ice......... Used in mo_strato_rates.F90
+!     hcl_gas      = Gas-phase HCL              Used in chemical solver. 
+!     hcl_cond     = Condensed HCl from STS     
 !
-!       RAD_strat(1) = Sulfate Aerosol... Used in mo_strato_rates.F90
-!       RAD_strat(2) = NAT large mode.... Used in mo_aero_settling.F90
-!       RAD_strat(3) = Water-Ice......... Not used in mo_aero_settling.F90
+!     SAD_strat(1) = Sulfate Aerosol... Used in mo_strato_rates.F90
+!     SAD_strat(2) = NAT Aerosol....    Used in mo_strato_rates.F90
+!     SAD_strat(3) = Water-Ice......... Used in mo_strato_rates.F90
+!
+!     RAD_strat(1) = Sulfate Aerosol... Used in mo_strato_rates.F90
+!     RAD_strat(2) = NAT large mode.... Used in mo_aero_settling.F90
+!     RAD_strat(3) = Water-Ice......... Not used in mo_aero_settling.F90
 !
 !   NOTE1: The sum of hno3_cond(1-2) will be added to hno3_gas for advection of HNO3 in
-!         WACCM3.
+!          mo_gas_phase_chemdr.F90.
 !
-!   NOTE2: This routine does not partition H2O.
+!   NOTE2: The sum of hcl_cond will be added to hcl_gas for advection of HCl in
+!          mo_gas_phase_chemdr.F90.
+!
+!   NOTE3: This routine does not partition H2O.
 !
 !
 ! ROUTINES Called (in and below this routine):
@@ -208,8 +206,8 @@
 !===============================================================================
 
       subroutine sad_strat_calc( lchnk, m, press, temper, hno3_gas, &
-                                 hno3_cond, h2o_gas, h2o_cond, sad_sage, radius_strat, &
-                                 sad_strat, ncol, pbuf )
+                                 hno3_cond, h2o_gas, h2o_cond, hcl_gas, hcl_cond, &
+                                 sad_sage, radius_strat, sad_strat, ncol, pbuf )
 
       use cam_history, only : outfld
       use physics_buffer, only : physics_buffer_desc
@@ -229,6 +227,8 @@
       real(r8), intent(inout) ::  h2o_cond    (ncol,pver)    ! H2O condensed phase  (mole fraction)
       real(r8), intent(inout) ::  hno3_gas    (ncol,pver)    ! HNO3 condensed phase (mole fraction)
       real(r8), intent(inout) ::  hno3_cond   (ncol,pver,2)  ! HNO3 condensed phase (mole fraction)
+      real(r8), intent(inout) ::  hcl_gas     (ncol,pver)    ! HCL gas-phase        (mole fraction)
+      real(r8), intent(inout) ::  hcl_cond    (ncol,pver)    ! HCL condensed phase  (mole fraction)
       real(r8), intent(out)   ::  radius_strat(ncol,pver,3)  ! Radius of Sulfate, NAT, and ICE (cm)
       real(r8), intent(out)   ::  sad_strat   (ncol,pver,3)  ! Surface area density of Sulfate, NAT, ICE (cm2 cm-3)
 
@@ -255,6 +255,10 @@
       real(r8) ::  hno3_gas_sulf (ncol,pver)     ! HNO3 after call to STS routines
       real(r8) ::  hno3_cond_nat (ncol,pver)     ! HNO3 condensed after call to NAT
       real(r8) ::  hno3_cond_sulf(ncol,pver)     ! HNO3 condensed after call to STS routines
+      real(r8) ::  hcl_total     (ncol,pver)     ! HCl total  = gas-phase + condensed
+      real(r8) ::  hcl_avail     (ncol,pver)     ! HCL temporary arrays
+      real(r8) ::  hcl_gas_sulf  (ncol,pver)     ! HCL after call to STS routines
+      real(r8) ::  hcl_cond_sulf (ncol,pver)     ! HCL condensed after call to STS routines
       real(r8) ::  temp          (pcols,pver)    ! wrk temperature array
       real(r8) ::  h2so4m        (ncol,pver)     ! wrk array
 
@@ -266,11 +270,9 @@
       logical  ::  mask_nat(ncol,pver)		 ! NAT mask T: mask_sts=T; T<Tsat_nat
       type(physics_buffer_desc), pointer :: pbuf(:)
 
-      if ( rad_feedback ) then
-         call sad_strat_calc_rad( lchnk, ncol, m, press, temper, hno3_gas, &
-                                  hno3_cond, h2o_gas, h2o_cond, sad_sage,  &
-                                  pbuf )
-      endif
+      real(r8), parameter :: eighty_percent = 0.8_r8
+      real(r8), parameter :: twenty_percent = 0.2_r8
+
 !----------------------------------------------------------------------
 !     ... initialize to zero
 !----------------------------------------------------------------------
@@ -280,7 +282,30 @@
             sad_strat(:,k,n)    = 0._r8
          end do
       end do
-
+!
+      do n = 1,2
+         do k = 1,pver
+            hno3_cond(:,k,n) = 0._r8
+         end do
+      end do
+!
+      do k = 1,pver
+            h2o_total     (:,k) = 0._r8
+!
+            h2o_avail     (:,k) = 0._r8
+            hno3_avail    (:,k) = 0._r8
+            hcl_avail     (:,k) = 0._r8
+!
+            hno3_total    (:,k) = 0._r8
+            hno3_gas_nat  (:,k) = 0._r8
+            hno3_gas_sulf (:,k) = 0._r8
+            hno3_cond_nat (:,k) = 0._r8
+            hno3_cond_sulf(:,k) = 0._r8
+!
+            hcl_total     (:,k) = 0._r8
+            hcl_cond_sulf (:,k) = 0._r8
+            hcl_gas_sulf  (:,k) = 0._r8
+      end do       
 !----------------------------------------------------------------------
 !     ... limit temperature
 !----------------------------------------------------------------------
@@ -295,6 +320,7 @@
       do k = sad_topp,pver
          hno3_total(:,k) = hno3_gas(:,k) + hno3_cond(:,k,1) + hno3_cond(:,k,2) 
 	 h2o_total(:,k)  = h2o_gas(:,k)  + h2o_cond(:,k)
+         hcl_total (:,k) = hcl_gas(:,k)  + hcl_cond(:,k)
       end do
 
 !======================================================================
@@ -335,6 +361,8 @@ sage_sad : &
 	       hno3_gas    (:,k)       = hno3_total(:,k)
                hno3_cond   (:,k,1)     = 0._r8
 	       hno3_cond   (:,k,2)     = 0._r8
+	       hcl_gas     (:,k)       = hcl_total(:,k)
+               hcl_cond    (:,k)       = 0._r8
             endwhere
          end do
          if( all( mask_lbs(:,sad_topp:pver) ) ) then
@@ -391,7 +419,7 @@ all_ice : &
 !           mask_lbs = false .... T > 200K or SAD_SULF <= 1e-15 or 
 !                                 P < 2hPa or P >300hPa
 !           mask_sts = true  .... not  mask_lbs
-!           mask_nat = true  .... T <= TSAT_NAT 
+!           mask_nat = true  .... T <= TSAT_NAT and  mask_sts = true
 !======================================================================
 !======================================================================
 
@@ -405,14 +433,16 @@ all_ice : &
          end do
       end do
 !----------------------------------------------------------------------
-!  	... STS
+!  	... STS (80% of total HNO3 logic)
 !----------------------------------------------------------------------
+!        NOTE: STS only sees 80% of the total HNO3 (Wegner et al., JGR, 2013a)
 sts_nat_sad : &
       if( any( mask_sts(:,sad_topp:pver) ) ) then
          do k = sad_topp,pver
             where( mask_sts(:,k) )
-               h2o_avail(:,k)    = h2o_total   (:,k)
-               hno3_avail(:,k)   = hno3_total(:,k)
+               h2o_avail (:,k)   = h2o_gas   (:,k)
+               hno3_avail(:,k)   = hno3_total(:,k)*eighty_percent
+               hcl_avail (:,k)   = hcl_total  (:,k)
             endwhere
 	    if( any(mask_sts(:,k)) ) then
 	       where( mask_sts(:,k) )
@@ -426,24 +456,28 @@ sts_nat_sad : &
 	    end if
          end do
 
-         call sulfate_sad_calc( ncol, press, temp, h2o_avail, hno3_avail, &
-                                sad_sage, m, hno3_gas_sulf, hno3_cond_sulf, sad_sulfate, &
-                                radius_sulfate, mask_sts, lchnk, 1, h2so4m, .true. )
-
+         call sulfate_sad_calc( ncol, press, temp, h2o_avail, hno3_avail, hcl_avail, &
+                                sad_sage, m, hno3_gas_sulf, hno3_cond_sulf, &
+                                hcl_gas_sulf, hcl_cond_sulf, sad_sulfate, &
+                                radius_sulfate, mask_sts, lchnk, 1, h2so4m, .true.)
          do k = sad_topp,pver
             where( mask_sts(:,k) )
                sad_strat   (:,k,1) = sad_sulfate   (:,k)
                radius_strat(:,k,1) = radius_sulfate(:,k)
                hno3_gas    (:,k)   = hno3_gas_sulf (:,k)
                hno3_cond   (:,k,1) = hno3_cond_sulf(:,k)
+               hcl_gas     (:,k)   = hcl_gas_sulf  (:,k)
+               hcl_cond    (:,k)   = hcl_cond_sulf (:,k)
             endwhere
          end do
 
 !----------------------------------------------------------------------
-!     ... NAT
+!     ... NAT (20% of total HNO3 logic)
 !     ... using total H2O and gas-phase HNO3 after STS calc
 !----------------------------------------------------------------------
-         call nat_sat_temp( ncol, hno3_gas_sulf, h2o_avail, press, tsat_nat, mask_sts)
+!        NOTE: NAT only sees 20% of the total HNO3 (Wegner et al., JGR, 2013a)
+         hno3_avail(:,:) = hno3_total(:,:)*twenty_percent
+         call nat_sat_temp( ncol, hno3_avail, h2o_avail, press, tsat_nat, mask_sts)
 
          do k = sad_topp,pver
 	   do i = 1,ncol
@@ -457,8 +491,8 @@ sts_nat_sad : &
 
          do k = sad_topp,pver
             where( mask_nat(:,k) )
-               h2o_avail (:,k) = h2o_total    (:,k)
-               hno3_avail(:,k) = hno3_gas_sulf(:,k)
+               h2o_avail (:,k) = h2o_gas      (:,k)
+               hno3_avail(:,k) = hno3_total   (:,k)*twenty_percent
             endwhere
 	    if( any(mask_nat(:,k)) ) then
 	       where( mask_nat(:,k) )
@@ -476,191 +510,34 @@ sts_nat_sad : &
 			    hno3_gas_nat, hno3_cond_nat, &
                             sad_nat, radius_nat, mask_nat )
 
+
+! NOTE:  Add in gas-phase from STS with gas-phase from NAT
          do k = sad_topp,pver
             where( mask_nat(:,k) )
                sad_strat   (:,k,2) = sad_nat       (:,k)
                radius_strat(:,k,2) = radius_nat    (:,k)
-               hno3_gas    (:,k)   = hno3_gas_nat  (:,k)
+               hno3_gas    (:,k)   = hno3_gas_sulf (:,k) + hno3_gas_nat  (:,k)
                hno3_cond   (:,k,2) = hno3_cond_nat (:,k)
             endwhere
          end do
+
+! NOTE:  If NAT does not form (in STS region), need to add the 20% of the total HNO3 back to gas-phase
+         do k = sad_topp,pver
+	   do i = 1,ncol
+             if ( .not. mask_nat(i,k) ) then
+               if ( mask_sts(i,k) ) then
+                 hno3_gas   (i,k) = hno3_gas_sulf(i,k) + hno3_total(i,k)*twenty_percent
+               end if
+             end if
+           end do
+         end do
+
       end if sts_nat_sad
 
 
       call outfld( 'H2SO4M_C', h2so4m(:ncol,:), ncol, lchnk )
 
       end subroutine sad_strat_calc
-
-      subroutine sad_strat_calc_rad( lchnk, ncol, m, press, temper, &
-                                     hno3_gas_in, hno3_cond_in, h2o_gas_in, h2o_cond_in, sad_sage, &
-                                     pbuf )
-
-      use physconst,   only : avogad,boltz,mwdry
-      use cam_history, only : outfld
-      use physics_buffer, only : physics_buffer_desc, pbuf_get_field
-      use cam_history_support, only : fillvalue
-
-      implicit none
-
-!-------------------------------------------------------------------------------
-!	... dummy arguments
-!-------------------------------------------------------------------------------
-      integer, intent(in)     ::  lchnk                      ! chnk id
-      integer, intent(in)     ::  ncol                       ! columns in chunk
-      real(r8), intent(in)    ::  m(ncol,pver)               ! Air density (molecules cm-3)
-      real(r8), intent(in)    ::  sad_sage(ncol,pver)        ! SAGEII surface area density (cm2 aer. cm-3 air)
-      real(r8), intent(in)    ::  press(ncol,pver)           ! Pressure, hPa
-      real(r8), intent(in)    ::  temper(pcols,pver)         ! Temperature (K)
-      real(r8), intent(in)    ::  h2o_gas_in(ncol,pver)      ! H2O gas-phase (mole fraction)
-      real(r8), intent(in)    ::  h2o_cond_in(ncol,pver)     ! H2O condensed phase (mole fraction)
-      real(r8), intent(in)    ::  hno3_gas_in(ncol,pver)     ! HNO3 condensed phase (mole fraction)
-      real(r8), intent(in)    ::  hno3_cond_in(ncol,pver,2)  ! HNO3 condensed phase (mole fraction)
-      type(physics_buffer_desc), pointer :: pbuf(:)
- 
-!-------------------------------------------------------------------------------
-!	... local variables
-!-------------------------------------------------------------------------------
-      real(r8), parameter :: temp_floor = 0._r8
-
-      integer  ::  i, k, n
-      integer  ::  dims(1)
-      real(r8) ::  hno3_total  (ncol,pver)       ! HNO3 total = gas-phase + condensed
-      real(r8) ::  h2o_total   (ncol,pver)       ! H2O total  = gas-phase + condensed
-      real(r8) ::  radius_lbs  (ncol,pver)       ! Radius of Liquid Binary Sulfate (cm)
-      real(r8) ::  radius_sulfate(ncol,pver)     ! Radius of Sulfate aerosol (cm)
-      real(r8) ::  radius_nat  (ncol,pver)       ! Radius of NAT aerosol     (cm)
-      real(r8) ::  radius_ice  (ncol,pver)       ! Radius of ICE aerosol     (cm)
-
-      real(r8) ::  sad_nat     (ncol,pver)       ! SAD of NAT aerosol        (cm2 cm-3)
-      real(r8) ::  sad_sulfate (ncol,pver)       ! SAD of Sulfate aerosol    (cm2 cm-3)
-      real(r8) ::  sad_ice     (ncol,pver)       ! SAD of ICE aerosol        (cm2 cm-3)
-      real(r8) ::  tsat_nat    (ncol,pver)       ! Temperature for NAT saturation
-      real(r8) ::  h2o_avail   (ncol,pver)       ! H2O temporary arrays
-      real(r8) ::  hno3_avail  (ncol,pver)       ! HNO3 temporary array
-      real(r8) ::  hno3_gas_nat(ncol,pver)       ! HNO3 after call to NAT routines
-      real(r8) ::  hno3_gas_sulf(ncol,pver)      ! HNO3 after call to STS routines
-
-      real(r8) ::  hno3_cond_nat (ncol,pver)     ! HNO3 condensed after call to NAT, large mode
-      real(r8) ::  hno3_cond_sulf(ncol,pver)     ! HNO3 condensed after call to STS routines
-      real(r8) ::  temp         (pcols,pver)     ! wrk temperature array
-      real(r8) ::  h2o_gas      (ncol,pver)      ! H2O gas-phase (mole fraction)
-      real(r8) ::  h2o_cond     (ncol,pver)      ! H2O condensed phase (mole fraction)
-      real(r8) ::  hno3_gas     (ncol,pver)      ! HNO3 condensed phase (mole fraction)
-      real(r8) ::  hno3_cond    (ncol,pver,2)    ! HNO3 condensed phase (mole fraction)
-
-
-      logical  ::  z_val(ncol)
-      logical  ::  mask_sulf(ncol,pver)
-      real(r8) ::  tmpfld(ncol,pver)
-
-      real(r8), pointer, dimension(:,:) :: h2so4m
-      real(r8), pointer, dimension(:,:) :: r_g_sulfate
-      real(r8) dens_fctr      ! = 1.e-11 * boltz * avogad / mwdry
-
-      dens_fctr = 1.e-11_r8 * boltz * avogad / mwdry
-
-      call pbuf_get_field(pbuf, h2so4_ndx, h2so4m )
-      call pbuf_get_field(pbuf, h2so4_r_g_ndx, r_g_sulfate )
-
-!----------------------------------------------------------------------
-!     ... initialize h2so4m, copy incoming variables to local space
-!----------------------------------------------------------------------
-      do k = 1,pver
-         radius_sulfate(:,k)     = 0._r8
-         sad_sulfate   (:,k)     = 0._r8
-         h2so4m        (:ncol,k) = 0._r8
-         r_g_sulfate   (:ncol,k) = 1._r8 
-         h2o_gas       (:ncol,k) = h2o_gas_in (:ncol,k)
-         h2o_cond      (:ncol,k) = h2o_cond_in(:ncol,k)
-         hno3_gas      (:ncol,k) = hno3_gas_in(:ncol,k)
-      end do
-
-      do n = 1,2
-         do k = 1,pver
-            hno3_cond(:ncol,k,n) = hno3_cond_in(:ncol,k,n)
-         end do
-      end do
-!----------------------------------------------------------------------
-!     ... limit temperature
-!----------------------------------------------------------------------
-      do k = 1,pver
-         temp(:ncol,k) = max( temp_floor,temper(:ncol,k) )
-      end do
-
-!----------------------------------------------------------------------
-!     ... total HNO3 and H2O gas and condensed phases
-!----------------------------------------------------------------------
-      do k = sad_topp,pver
-         hno3_total(:,k) = hno3_gas(:,k) + hno3_cond(:,k,1) + hno3_cond(:,k,2) 
-	 h2o_total(:,k)  = h2o_gas(:,k)  + h2o_cond(:,k)
-      end do
-
-!======================================================================
-!======================================================================
-!     ... Sulfate logic for Radiation (derive H2SO4m)
-!
-!     ... mask_sulf  = true  ....SAD_SULF > 1e-15 and 
-!                                P >= 2hPa and  P <= 300hPa
-!======================================================================
-!======================================================================
-      mask_sulf(:,:) = .false. ! initialize to false
-      do k = sad_topp,pver
-         mask_sulf(:,k) =  sad_sage(:,k) > 1.e-15_r8 &
-                          .and. press(:ncol,k) >= 2._r8 .and. press(:ncol,k) <= 300._r8
-      end do
-
-all_sad : &
-      if( any( mask_sulf(:,sad_topp:pver) ) ) then
-
-         do k = sad_topp,pver
-            where( mask_sulf(:,k) )
-               h2o_avail(:,k)  = h2o_total(:,k)
-               hno3_avail(:,k) = hno3_total(:,k)
-            endwhere
-	    if( any(mask_sulf(:,k)) ) then
-	       where( mask_sulf(:,k) )
-	          z_val(:) = hno3_avail(:,k) == 0._r8
-	       elsewhere
-	          z_val(:) = .false.
-	       endwhere
-	       if( any( z_val(:) ) ) then
-	          write(iulog,*) 'sad_strat_calc: Before RAD Sulfate_SAD_CALC_1 has zero hno3_avail at lchnk,k = ',lchnk,k
-	       end if
-	    end if
-         end do
-
-!----------------------------------------------------------------------
-!  	... H2O Gas available for forming STS
-!           The HNO3 avail for the STS aerosol is the total HNO3 avail
-!----------------------------------------------------------------------
-         call sulfate_sad_calc( ncol, press, temp, h2o_avail, hno3_avail, &
-                                sad_sage, m, hno3_gas_sulf, hno3_cond_sulf, sad_sulfate, &
-                                radius_sulfate, mask_sulf, lchnk, 11, h2so4m(:ncol,:), .false., r_g_sulfate=r_g_sulfate(:ncol,:) )
-
-      end if all_sad
-
-      call outfld( 'SAD_SULFR', sad_sulfate   (:ncol,:), ncol, lchnk )
-      call outfld( 'RAD_SULFR', radius_sulfate(:ncol,:), ncol, lchnk )
-      call outfld( 'H2SO4M_R',  h2so4m        (:ncol,:), ncol, lchnk )
-
-      ! need mmr and geometric mean radius for radiation
-      ! assume aerosol is 75% H2SO4, 25% H2O  hence factor of (4/3) in conversion below
-      !  The assumption of 75%/25% weight ratio is part of assumptions in optics
-      ! convert: (micrograms dry H2SO4) / m^3 --> kg (wet aerosol) / kg (dry air)
-      ! geometric_mean_radius = effective_radius * exp(-5*sigma^2/2)
-
-      do k = 1,pver
-         h2so4m(:ncol,k) = four_thrd*h2so4m(:ncol,k) * dens_fctr * temper(:ncol,k) / press(:ncol,k)
-      enddo
-
-      call outfld( 'H2SO4MMR', h2so4m(:ncol,:), ncol, lchnk )
-      tmpfld(:,:) = fillvalue
-      where ( mask_sulf(:ncol,:) ) 
-         tmpfld(:ncol,:) = r_g_sulfate(:ncol,:)
-      endwhere
-      call outfld( 'VOLC_RAD_GEOM', tmpfld(:ncol,:), ncol, lchnk)
-
-      end subroutine sad_strat_calc_rad
 
       subroutine nat_sat_temp( ncol, hno3_total, h2o_avail, press, tsat_nat, mask )
 
@@ -827,10 +704,10 @@ all_sad : &
 
       end subroutine ice_sad_calc
 
-      subroutine sulfate_sad_calc( ncol, press, temp, h2o_avail, hno3_avail, &
-                                   sad_sage, m, hno3_gas, hno3_cond, sad_sulfate, &
-                                   radius_sulfate, mask, lchnk, flag, h2so4m, is_chem, r_g_sulfate )
-
+      subroutine sulfate_sad_calc( ncol, press, temp, h2o_avail, hno3_avail, hcl_avail, &
+                                   sad_sage, m, hno3_gas, hno3_cond, &
+                                   hcl_gas, hcl_cond, sad_sulfate, &
+                                   radius_sulfate, mask, lchnk, flag, h2so4m, is_chem)
       implicit none
 
 !----------------------------------------------------------------------
@@ -843,16 +720,17 @@ all_sad : &
       real(r8), intent(in)  :: m          (ncol,pver)
       real(r8), intent(in)  :: h2o_avail  (ncol,pver)
       real(r8), intent(in)  :: hno3_avail (ncol,pver)
+      real(r8), intent(in)  :: hcl_avail  (ncol,pver)   
       real(r8), intent(in)  :: sad_sage   (ncol,pver)
       real(r8), intent(out) :: hno3_gas   (ncol,pver)       ! Gas-phase HNO3, mole fraction
       real(r8), intent(out) :: hno3_cond  (ncol,pver)       ! Condensed phase HNO3, mole fraction
+      real(r8), intent(out) :: hcl_gas    (ncol,pver)       ! Gas-phase HCL, mole fraction
+      real(r8), intent(out) :: hcl_cond   (ncol,pver)       ! Condensed phase HCL, mole fraction
       real(r8), intent(out) :: sad_sulfate(ncol,pver)   
       real(r8), intent(out) :: radius_sulfate(ncol,pver)
       real(r8), intent(inout) :: h2so4m   (ncol,pver)       ! mass per volume, micro grams m-3
       logical, intent(in)   :: is_chem                      ! chemistry calc switch
       logical, intent(in)   :: mask       (ncol,pver)
-
-      real(r8), optional, intent(out) :: r_g_sulfate(ncol,pver)          ! geometric mean radius
 
 !----------------------------------------------------------------------
 !	... local variables
@@ -872,15 +750,39 @@ all_sad : &
       real(r8) :: sulfate_vol_dens(ncol,pver)  ! Volume Density, cm3 aerosol  cm-3 air
       real(r8) :: wtf             (ncol,pver)  ! weight fraction of H2SO4 in ternary soln
       real(r8) :: wts             (ncol,pver)  ! weight percent of ternary solution
+
+! Carslaw HCl solubility
+      real(r8) :: wts0            (ncol,pver)  ! weight percent of H2SO4 is LBS
+      real(r8) :: wtn             (ncol,pver)  ! weight percent of HNO3 in STS
+      real(r8) :: ch2so4          (ncol,pver)  ! Total H2SO4 (moles / cm3 of air)
+      real(r8) :: molh2so4        (ncol,pver)  ! Equil molality of H2SO4 in STS
+      real(r8) :: molhno3         (ncol,pver)  ! Equil molality of HNO3 in STS
+      real(r8) :: AD              (ncol,pver)  ! air density (molecules cm-3)
+      real(r8) :: xmf             (ncol,pver)  ! 
+      real(r8) :: hhcl            (ncol,pver)  ! henry's solubility of hcl in binary
+      real(r8) :: phcl0           (ncol,pver)  ! partial pressure of hcl (hPa)
+      real(r8) :: h2so4vmr        (ncol,pver)  ! atmospheric mole fraction of H2SO4
+      real(r8) :: nsul            (ncol,pver)  ! moles / m3- H2SO4 pure liquid 
+      real(r8) :: mcl             (ncol,pver)  ! molality of hcl in ?
+      real(r8) :: wtcl            (ncol,pver)  ! 
+      real(r8) :: phcl            (ncol,pver)  ! partial pressure of hcl (over aerosol)
+      real(r8) :: parthcl         (ncol,pver)  ! fraction of HCl in gas-phase
+!
       real(r8) :: packer          (ncol*pver)
       logical  :: do_equil                     ! local mask
       logical  :: mask_lt         (ncol,pver)  ! local temperature mask
       logical  :: maskx           (ncol,pver)
       logical  :: converged       (ncol,pver)  ! EQUIL convergence test
 
+      hcl_gas (:,:) = 0.0_r8
+      hcl_cond(:,:) = 0.0_r8
+      parthcl (:,:) = 0.0_r8
+      phcl0   (:,:) = 0.0_r8
+
       do k = sad_topp,pver
          mask_lt(:,k)  = mask(:,k)
       end do
+
 !----------------------------------------------------------------------
 !  	... derive H2SO4 (micro grams / m3) from SAGEII SAD
 !----------------------------------------------------------------------
@@ -922,28 +824,82 @@ all_sad : &
       if( do_equil ) then
 
          call equil( temp, h2so4m, hno3_avail, h2o_avail, press, & 
-                     hno3_cond, h2so4_cond, wts, mask_lt, ncol, &
-                     lchnk, flag, is_chem, converged )
-         
+                     hno3_cond, h2so4_cond, wts, wtn, wts0, molh2so4, molhno3, mask_lt, ncol, &
+                     lchnk, flag, is_chem, converged )       
+  
          do k = sad_topp,pver
 
-	   where( ( mask_lt(:,k) ) .AND. ( converged(:,k) ) )
+	   where( ( mask_lt(:ncol,k) ) .AND. ( converged(:ncol,k) ) )
 
 !----------------------------------------------------------------------
 !     .... convert h2o, hno3 from moles cm-3 air to molecules cm-3 air
 !----------------------------------------------------------------------
-               hno3_cond(:,k) = min( hno3_cond(:,k),hno3_avail(:,k) )
-               hno3_gas(:,k)  = hno3_avail(:,k) - hno3_cond(:,k)
+               hno3_cond(:ncol,k) = min( hno3_cond(:ncol,k),hno3_avail(:ncol,k) )
+               hno3_gas(:ncol,k)  = hno3_avail(:ncol,k) - hno3_cond(:ncol,k)
 
 !----------------------------------------------------------------------
 !     .... Derive ternary volume density (cm3 aer / cm3 air)
 !----------------------------------------------------------------------
-               wtf(:,k) = .01_r8* wts(:,k)
-               sulfate_vol_dens(:,k) = h2so4_cond(:,k)*mwh2so4/(wtf(:,k)*h2so4_aer_dens(:,k))
+               wtf(:ncol,k) = .01_r8* wts(:ncol,k)
+               sulfate_vol_dens(:ncol,k) = h2so4_cond(:ncol,k)*mwh2so4/(wtf(:ncol,k)*h2so4_aer_dens(:ncol,k))
+
+! Carslaw solubility
+!----------------------------------------------------------------------
+!     .... Partition HCl (gas/condensed) *** Carslaw
+!----------------------------------------------------------------------
+!          THE SOLUBILITY OF HCL 
+!          HHCl (MOL/KG/ATM) taken form Shi et al., JGR 2001
+!
+
+!     .... Convert weight % to weight fraction 
+                wtn(:ncol,k) = wtn(:ncol,k) * 0.01_r8 
+                wts0(:ncol,k) = wts0(:ncol,k) * 0.01_r8
+
+!     .... Derive xmf (mole fraction H2SO4 in LBS )
+                xmf(:ncol,k) = (wts0(:ncol,k)*100.0_r8)/((wts0(:ncol,k)*100.0_r8)+ &
+                           (100.0_r8-(wts0(:ncol,k)*100._r8))*98.0_r8/18.0_r8)
+
+!     .... Derive hhcl (henry's solubility of hcl in binary)
+                hhcl(:ncol,k) = (0.094_r8-0.61_r8*xmf(:ncol,k)+1.2_r8*xmf(:ncol,k)**2.0_r8) &
+                            *exp(-8.68_r8+(8515.0_r8-10718.0_r8*xmf(:ncol,k)**(0.7_r8))/temp(:ncol,k)) 
+
+!     .... Derive phcl0 (partial pressure of hcl( hPa))
+                phcl0(:ncol,k) = hcl_avail(:ncol,k)*press(:ncol,k) / 1013.26_r8
+
+!     .... Derive H2SO4 vmr (h2so4_cond = mole / cm-3)
+                AD(:ncol,k) = (6.022098e23_r8 * press(:ncol,k) / 1013.26_r8) &
+                           / (temp(:ncol,k)*8.2058e-2_r8*1000.0_r8)
+                h2so4vmr(:ncol,k)  = (h2so4_cond(:ncol,k)*6.022098e23_r8) / AD(:ncol,k)
+
+!     .... Derive nsul (moles / m3 H2SO4 pure liquid )
+                nsul(:ncol,k)  = h2so4vmr(:ncol,k) * press(:ncol,k) * 100.0_r8 / 8.314_r8 / temp(:ncol,k)
+
+!     .... Derive  mcl (molality of hcl)
+                mcl(:ncol,k) = (1.0_r8/8.314e-5_r8/temp(:ncol,k)*phcl0(:ncol,k))/(nsul(:ncol,k)/molh2so4(:ncol,k) + &
+                           1.0_r8/(8.314e-5_r8)/temp(:ncol,k)/hhcl(:ncol,k)) 
+
+!     .... Derive wtcl ( )
+                wtcl(:ncol,k) = mcl(:ncol,k)*36.5_r8/(1000.0_r8 + 98.12_r8*molh2so4(:ncol,k) + 63.03_r8*molhno3(:ncol,k)) 
+
+!     .... Derive phcl (partial pressure over the aerosol)
+                phcl(:ncol,k) = mcl(:ncol,k)/hhcl(:ncol,k) 
+
+!     .... Derive parhcl (fraction of HCl in gas-phase)
+                where(phcl0(:ncol,k)>0._r8)
+                  parthcl(:ncol,k) = 1.0_r8 - (phcl0(:ncol,k) - phcl(:ncol,k)) / phcl0(:ncol,k)
+                elsewhere
+                  parthcl(:ncol,k) = 0._r8
+                endwhere
+
+!     .... Partition HCl (gas/condensed)  
+                hcl_gas (:ncol,k)  = hcl_avail(:ncol,k) * parthcl(:ncol,k)
+                hcl_cond(:ncol,k)  = hcl_avail(:ncol,k) - hcl_gas(:ncol,k)
 
             elsewhere
-               hno3_cond(:,k) = 0.0_r8
-               hno3_gas(:,k)  = hno3_avail(:,k)
+               hno3_cond(:ncol,k) = 0.0_r8
+               hno3_gas(:ncol,k)  = hno3_avail(:ncol,k)
+               hcl_cond (:ncol,k) = 0.0_r8
+               hcl_gas  (:ncol,k) = hcl_avail(:ncol,k)
 
             endwhere
          end do
@@ -966,20 +922,6 @@ all_sad : &
                                    /(four_pi*sulfate_part_dens))**one_thrd &
                                   *exp( -1.5_r8*(log( sigma_sulfate ))**2 )
 	 endwhere
-
-!----------------------------------------------------------------------
-!     .... Calculate the geometric mean radius (assuming ternary solution) 
-!          r_g = r_eff*exp(-5*ln(sigma)^2/2)  
-!    convert to cm to meters (1/100)
-!----------------------------------------------------------------------
-         if (present(r_g_sulfate)) then
-            where( mask(:,k) )
-               r_g_sulfate(:,k) = (3._r8*sulfate_vol_dens(:,k) &
-                    /(four_pi*sulfate_part_dens))**one_thrd &
-                    *exp( -4._r8*(log( sigma_sulfate ))**2 ) &
-                    /100._r8
-            endwhere
-         endif
 
       end do
 
@@ -1019,7 +961,7 @@ all_sad : &
 !----------------------------------------------------------------------
       real(r8), parameter :: avo_num          = 6.02214e23_r8, &
                              nat_mass_dens    = 1.6_r8, &
-                             nat_part_dens    = 1.0e-1_r8, &
+                             nat_part_dens    = 1.0e-2_r8, &
                              mwnat            = 117._r8, &
                              sigma_nat        = 1.6_r8, &
                              nat_dens_aer     = nat_mass_dens / (mwnat/avo_num), &
@@ -1250,9 +1192,8 @@ masked :   if( mask(i,k) ) then
 !        WTS       = Weight percent of H2SO4 in the ternary aerosol
 !
 !======================================================================
-
       subroutine equil( temper, h2so4m, hno3_avail, h2o_avail, press, &
-                        hno3_cond, ch2so4, wts, mask, ncol, &
+                        hno3_cond, ch2so4, wts, wtn, wts0, molh2so4, molhno3, mask, ncol, &
                         lchnk, flag, is_chem, converged)
 !----------------------------------------------------------------------
 !                       Written by Azadeh Tabazadeh (1993)
@@ -1336,6 +1277,10 @@ masked :   if( mask(i,k) ) then
       real(r8), intent(out) :: hno3_cond(ncol,pver)    
       real(r8), intent(out) :: ch2so4(ncol,pver)    
       real(r8), intent(out) :: wts(ncol,pver)
+      real(r8), intent(out) :: wtn(ncol,pver)
+      real(r8), intent(out) :: wts0(ncol,pver)
+      real(r8), intent(out) :: molh2so4(ncol,pver)
+      real(r8), intent(out) :: molhno3(ncol,pver)
       logical, intent(in)   :: is_chem
       logical, intent(in)   :: mask(ncol,pver)              ! activation mask
       logical, intent(out)  :: converged(ncol,pver)
@@ -1343,7 +1288,6 @@ masked :   if( mask(i,k) ) then
 !	... local variables
 !----------------------------------------------------------------------
 !      integer, parameter  :: itermax = 50
-!!DEK
       integer, parameter  :: itermax = 100
       real(r8), parameter :: con_lim  = .00005_r8
       real(r8), parameter :: t0       = 298.15_r8
@@ -1356,7 +1300,6 @@ masked :   if( mask(i,k) ) then
       real(r8) :: reduction_factor
       real(r8) :: p
       real(r8) :: tr
-      real(r8) :: wts0
       real(r8) :: wtn0
       real(r8) :: pures
       real(r8) :: puren
@@ -1377,12 +1320,10 @@ masked :   if( mask(i,k) ) then
       real(r8) :: lnks
       real(r8) :: lnks0
       real(r8) :: mixyln
-      real(r8) :: molhno3
-      real(r8) :: molh2so4
       real(r8) :: wrk_h2so4
       real(r8) :: cphno3new
       real(r8) :: con_val
-      real(r8) :: t, t1, t2, f, f1, f2, ymix, hplus, wtotal, wtn, ratio 
+      real(r8) :: t, t1, t2, f, f1, f2, ymix, hplus, wtotal, ratio 
       real(r8) :: con_crit
       real(r8) :: h2o_cond(ncol,pver)
       real(r8) :: fratio(0:itermax)
@@ -1401,11 +1342,9 @@ masked :   if( mask(i,k) ) then
       else
          con_crit = con_crit_chem
       end if
-Level_loop : &
-      do k = sad_topp,pver
-Column_loop : &
-	 do i = 1,ncol
-	    if( mask(i,k) ) then
+      Level_loop : do k = sad_topp,pver
+         Column_loop : do i = 1,ncol
+            if( mask(i,k) ) then
                p = h2o_avail(i,k) * press(i,k) * .7501_r8
 !----------------------------------------------------------------------
 !	Calculating the molality for pure binary systems of H2SO4/H2O
@@ -1421,15 +1360,12 @@ Column_loop : &
 !----------------------------------------------------------------------
 !	... H2SO4/H2O pure weight percent and molality
 !----------------------------------------------------------------------
-!!DEK
-               wts0  = max( 0.01_r8,c(1) + p*(-c(2) + p*(c(3) + p*(-c(4) + p*(c(5) - p*c(6))))) )
-               pures = (wts0 * 1000._r8)/(100._r8 - wts0)
+               wts0(i,k)  = max( 0.01_r8,c(1) + p*(-c(2) + p*(c(3) + p*(-c(4) + p*(c(5) - p*c(6))))) )
+               pures = (wts0(i,k) * 1000._r8)/(100._r8 - wts0(i,k))
                pures = pures / 98._r8
 !----------------------------------------------------------------------
 !	... HNO3/H2O pure weight percent and molality
 !----------------------------------------------------------------------
-!              puren = c(7) + p*(-c(8) + p*(c(9) + p*(-c(10) + p*(c(11) - p*c(12)))))
-!!DEK
                puren = max( 0._r8,c(7) + p*(-c(8) + p*(c(9) + p*(-c(10) + p*(c(11) - p*c(12))))) )
 !              wtn0 = (puren * 6300._r8) /(puren * 63._r8 + 1000._r8)
 !----------------------------------------------------------------------
@@ -1484,13 +1420,13 @@ Iter_loop :    do iter = 1,itermax
 	          h2o_cond(i,k) = t1 + wrk_h2so4
 		  if( h2o_cond(i,k) > 0._r8 ) then
                      wrk      = 1.e3_r8 / (18._r8 * h2o_cond(i,k))
-                     molhno3  = cno3new * wrk
-                     molh2so4 = ch2so4(i,k) * wrk
+                     molhno3(i,k)  = cno3new * wrk
+                     molh2so4(i,k) = ch2so4(i,k) * wrk
 		  else
-                     molhno3  = 0._r8
-                     molh2so4 = 0._r8
+                     molhno3(i,k)  = 0._r8
+                     molh2so4(i,k) = 0._r8
 		  end if
-                  stren	= molhno3 + 3._r8 * molh2so4
+                  stren	= molhno3(i,k) + 3._r8 * molh2so4(i,k)
 !----------------------------------------------------------------------
 !	(1) Calculate the activity of H2SO4 at a given STREN
 !----------------------------------------------------------------------
@@ -1505,20 +1441,17 @@ Iter_loop :    do iter = 1,itermax
 !	(3) Calculate the mixed activity coefficient for HNO3 at STREN
 !	    as described by Tabazadeh et al.
 !----------------------------------------------------------------------
-                  f1	 = 2._r8 * (molh2so4 + molhno3) * actn
-                  f2	 = 2.25_r8 * molh2so4 * acts
+                  f1	 = 2._r8 * (molh2so4(i,k) + molhno3(i,k)) * actn
+                  f2	 = 2.25_r8 * molh2so4(i,k) * acts
 
-!                  mixyln = (f1 + f2) / (2._r8 * stren)
-!!DEK
                   if (stren > 0._r8) then
                     mixyln = (f1 + f2) / (2._r8 * stren)
                   else
                     mixyln = 0._r8
                   end if
-
                   ymix	 = exp( mixyln )
-                  hplus	 = 2._r8 * molh2so4 + molhno3
-                  num = ymix**2 * hplus * molhno3
+                  hplus	 = 2._r8 * molh2so4(i,k) + molhno3(i,k)
+                  num = ymix**2 * hplus * molhno3(i,k)
                   den = 1000._r8 * cphno3new * .0820578_r8 * t * ks
 		  if( chno3 == 0._r8 ) then
 	             converged(i,k) = .true.
@@ -1588,31 +1521,27 @@ Iter_loop :    do iter = 1,itermax
 		  end if
                end do Iter_loop
 
-               wtotal   = molhno3 * 63._r8 + molh2so4 * 98._r8 + 1000._r8
-               wts(i,k) = (molh2so4 * 9800._r8) / wtotal
+               wtotal   = molhno3(i,k) * 63._r8 + molh2so4(i,k) * 98._r8 + 1000._r8
+               wts(i,k) = (molh2so4(i,k) * 9800._r8) / wtotal
+               wtn(i,k) = (molhno3(i,k) *6300._r8)/ wtotal
 	       if( cno3new /= 0._r8 .or. cphno3new /= 0._r8 ) then
                   ratio	= max( 0._r8,min( 1._r8,cno3new/(cphno3new + cno3new) ) )
                   hno3_cond(i,k) = ratio*hno3_avail(i,k)
 	       else
                   hno3_cond(i,k) = 0._r8
 	       end if
-	       if( .not. converged(i,k) ) then
-		  write(iulog,*) 'equil: Failed to converge @ is_chem,flag,lchnk,i,k,f = ',is_chem,flag,lchnk,i,k,f
-!	          write(iulog,'(''equil: temper = '',z16)') temper(i,k)
-!!DEK		  write(iulog,*) '       h2o_avail,hno3_avail,p,t = ',h2o_avail(i,k),hno3_avail(i,k),press(i,k),temper(i,k)
-!!DEK		  write(iulog,*) '       molhno3,molh2so4,h2o_cond,hno3_cond = ',molhno3,molh2so4,h2o_cond(i,k),hno3_cond(i,k)
-!!DEK
-                     write(iulog,*) '       wts0,pures,puren,chno3,ch2so4 = ',wts0,pures,puren,chno3,ch2so4(i,k)
-                     write(iulog,*) '       stren,mixyln,ymix,hplus,num,den = ',stren,mixyln,ymix,hplus,num,den
-                     write(iulog,*) '       h2o_avail,hno3_avail,p,t = ',h2o_avail(i,k),hno3_avail(i,k),press(i,k),temper(i,k)
-                     write(iulog,*) '       molhno3,molh2so4,h2o_cond,hno3_cond = ',molhno3,molh2so4,h2o_cond(i,k),hno3_cond(i,k)
+               if( .not. converged(i,k) ) then
+                  write(iulog,*) 'equil: Failed to converge @ is_chem,flag,lchnk,i,k,f = ',is_chem,flag,lchnk,i,k,f
+                  write(iulog,*) '       wts0,pures,puren,chno3,ch2so4 = ',wts0(i,k),pures,puren,chno3,ch2so4(i,k)
+                  write(iulog,*) '       stren,mixyln,ymix,hplus,num,den = ',stren,mixyln,ymix,hplus,num,den
+                  write(iulog,*) '       h2o_avail,hno3_avail,p,t = ',h2o_avail(i,k),hno3_avail(i,k),press(i,k),temper(i,k)
+                  write(iulog,*) '       molhno3,molh2so4,h2o_cond,hno3_cond = ', &
+                                 molhno3(i,k),molh2so4(i,k),h2o_cond(i,k),hno3_cond(i,k)
                   if( con_val > .05_r8 ) then
                      write(iulog,*) ' '
                      write(iulog,*) 'equil; diagnostics at lchnk, flag, i, k, iter = ',lchnk,flag,i,k,iter
                      write(iulog,*) 'equil; fratio'
-!!DEK
                      write(iulog,'(5(1pg15.7))') fratio(0:iter-1)
-!                     write(iulog,'(5(1pg15.7))') fratio(1:iter)
                      write(iulog,*) ' '
                      write(iulog,*) 'equil; delx'
                      write(iulog,'(5(1pg15.7))') delx(0:iter-1)
@@ -1620,9 +1549,7 @@ Iter_loop :    do iter = 1,itermax
                      write(iulog,*) 'equil; delz'
                      write(iulog,'(5(1pg15.7))') delz(0:iter-1)
                      write(iulog,*) ' '
-!!DEK	  	     call endrun('mo_sad.equil: ERROR 2 -- did not converge')
-!!DEK
-                 else if( iter > 50 ) then
+                  else if( iter > 50 ) then
                      write(iulog,*) 'equil: Iterations are beyond 50, number of iter = ',iter
                      write(iulog,*) 'equil: converged @ is_chem,flag,lchnk,i,k = '
                      write(iulog,*) is_chem,flag,lchnk,i,k
@@ -1630,8 +1557,8 @@ Iter_loop :    do iter = 1,itermax
                      write(iulog,*) f, num, den
                      write(iulog,*) '       h2o_avail,hno3_avail,p,t = '
                      write(iulog,*) h2o_avail(i,k),hno3_avail(i,k),press(i,k),temper(i,k)
-                     write(iulog,*) '       molhno3,molh2so4,h2o_cond,hno3_cond = '
-                     write(iulog,*) molhno3,molh2so4,h2o_cond(i,k),hno3_cond(i,k)
+                     write(iulog,*) '       molhno3(i,k),molh2so4(i,k),h2o_cond,hno3_cond = '
+                     write(iulog,*) molhno3(i,k),molh2so4(i,k),h2o_cond(i,k),hno3_cond(i,k)
                   end if
 	       end if
             end if
