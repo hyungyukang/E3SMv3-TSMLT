@@ -717,7 +717,7 @@ my $prog_species = $cfg->get('prog_species');
 my $prog_ghg1    = ($chem =~ "trop_mozart" or $chem =~ "trop_strat" or $chem =~ "ghg" or $prog_species =~ "GHG");
 my $prog_ghg2    = ($chem =~ "ghg" or $prog_species =~ "GHG");
 my $ghg_chem     = ($chem =~ "ghg");
-my $aero_chem    = ($chem =~ "aero" or $chem eq 'trop_mozart' or $chem eq 'trop_mozart_soa'  or $chem =~ 'trop_strat' or $chem eq 'trop_bam' or $chem eq 'tsmlt');
+my $aero_chem    = ($chem =~ "aero" or $chem eq 'trop_mozart' or $chem eq 'trop_mozart_soa'  or $chem =~ 'trop_strat' or $chem eq 'trop_bam' or $chem =~ 'tsmlt');
 my $vbs_soa      = $cfg->get('vbs');
 
 my $chem_rad_passive = ($nl->get_value('chem_rad_passive') =~ /$TRUE/io);
