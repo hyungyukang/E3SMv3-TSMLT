@@ -15,6 +15,9 @@ module camsrfexch
   use infnan,        only: posinf, assignment(=)
   use cam_abortutils,    only: endrun
   use cam_logfile,   only: iulog
+  use srf_field_check, only: active_Sl_ram1, active_Sl_fv, active_Sl_soilw,                &
+                             active_Fall_flxdst1, active_Fall_flxvoc, active_Fall_flxfire, &
+                             active_Faxa_nhx, active_Faxa_noy
 
   implicit none
 
@@ -128,6 +131,10 @@ module camsrfexch
      real(r8), pointer, dimension(:,:) :: depvel   ! deposition velocities
      real(r8), pointer, dimension(:,:) :: dstflx   ! dust fluxes
      real(r8), pointer, dimension(:,:) :: meganflx ! MEGAN fluxes
+#ifdef TSMLT
+     real(r8), pointer, dimension(:,:) :: fireflx ! wild fire emissions
+     real(r8), pointer, dimension(:)   :: fireztop ! wild fire emissions vert distribution top
+#endif
   end type cam_in_t    
 
 !===============================================================================
