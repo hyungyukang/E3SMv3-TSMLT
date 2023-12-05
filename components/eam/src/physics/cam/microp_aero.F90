@@ -43,6 +43,12 @@ use ndrop_bam,        only: ndrop_bam_init, ndrop_bam_run, ndrop_bam_ccn
 use hetfrz_classnuc_cam, only: hetfrz_classnuc_cam_readnl, hetfrz_classnuc_cam_register, hetfrz_classnuc_cam_init, &
                                hetfrz_classnuc_cam_save_cbaero, hetfrz_classnuc_cam_calc
 
+use aerosol_properties_mod, only: aerosol_properties
+use modal_aerosol_properties_mod, only: modal_aerosol_properties
+
+use aerosol_state_mod, only: aerosol_state
+use modal_aerosol_state_mod, only: modal_aerosol_state
+
 use cam_history,      only: addfld, add_default, outfld
 use cam_logfile,      only: iulog
 use cam_abortutils,       only: endrun
@@ -53,6 +59,8 @@ private
 save
 
 public :: microp_aero_init, microp_aero_run, microp_aero_readnl, microp_aero_register
+public :: aerosol_state_object
+public :: aerosol_properties_object
 
 ! Private module data
 
@@ -124,6 +132,13 @@ logical  :: separate_dust = .false.
 logical  :: liqcf_fix
 real(r8), parameter :: unset_r8   = huge(1.0_r8)
 real(r8) :: wsubmin = unset_r8 !PMA sets a much lower lower bound
+
+type aero_state_t
+   class(aerosol_state), pointer :: obj=>null()
+end type aero_state_t
+
+class(aerosol_properties), pointer :: aero_props_obj=>null()
+type(aero_state_t), pointer :: aero_state(:) => null()
 
 
 contains
@@ -216,7 +231,8 @@ subroutine microp_aero_init
       cldo_idx     = pbuf_get_index('CLDO')
       dgnumwet_idx = pbuf_get_index('DGNUMWET')
 
-      call ndrop_init()
+      aero_props_obj => modal_aerosol_properties()
+      call ndrop_init(aero_props_obj)
 
       ! Init indices for specific modes/species
 
@@ -448,6 +464,7 @@ subroutine microp_aero_run ( &
 
    real(r8) :: lcldn(pcols,pver)   ! fractional coverage of new liquid cloud
    real(r8) :: lcldo(pcols,pver)   ! fractional coverage of old liquid cloud
+   real(r8) :: cldliqf(pcols,pver) ! fractional of total cloud that is liquid
    real(r8) :: qcld                ! total cloud water
    real(r8) :: nctend_mixnuc(pcols,pver)
    real(r8) :: dum, dum2           ! temporary dummy variable
@@ -725,6 +742,7 @@ subroutine microp_aero_run ( &
       ! partition cloud fraction into liquid water part
       lcldn = 0._r8
       lcldo = 0._r8
+      cldliqf = 0._r8
       do k = top_lev, pver
          do i = 1, ncol
             qcld = qc(i,k) + qi(i,k)
@@ -735,6 +753,7 @@ subroutine microp_aero_run ( &
                else
                   lcldn(i,k) = cldn(i,k)*qc(i,k)/qcld
                   lcldo(i,k) = cldo(i,k)*qc(i,k)/qcld
+                  cldliqf(i,k) = state1%q(i,k,cldliq_idx)/qcld
                endif
             end if
          end do
@@ -743,9 +762,19 @@ subroutine microp_aero_run ( &
       call outfld('LCLOUD', lcldn, pcols, lchnk)
 
       call t_startf('dropmixnuc')
-      call dropmixnuc( &
-         state, ptend, deltatin, pbuf, wsub, &
-         lcldn, lcldo, nctend_mixnuc, factnum)
+!     call dropmixnuc( &
+!        state, ptend, deltatin, pbuf, wsub, &
+!        lcldn, lcldo, nctend_mixnuc, factnum)
+      if (use_preexisting_ice) then
+         call dropmixnuc( aero_props_obj, aero_state1_obj, &
+              state1, ptend_loc, deltatin, pbuf, wsub, &
+              cldn, cldo, cldliqf, nctend_mixnuc, factnum)
+      else
+         cldliqf = 1._r8
+         call dropmixnuc( aero_props_obj, aero_state1_obj, &
+              state1, ptend_loc, deltatin, pbuf, wsub, &
+              lcldn, lcldo, cldliqf, nctend_mixnuc, factnum)
+      end if
       call t_stopf('dropmixnuc')
 
       npccn(:ncol,:) = nctend_mixnuc(:ncol,:)

@@ -433,7 +433,7 @@ contains
     use mo_snoe,          only: set_no_ubc, ndx_no
     use mo_tgcm_ubc,      only: set_tgcm_ubc
     use cam_abortutils,   only: endrun
-    use air_composition,  only: rairv, mbarv ! gas constant, mean mass
+    use physconst,        only: rairv, mbarv ! gas constant, mean mass
     use constituents,     only: cnst_mw  ! Needed for ubc_flux
 
 !------------------------------Arguments--------------------------------
@@ -535,7 +535,7 @@ contains
   subroutine ubc_get_flxs (lchnk, ncol, pint, zi, t, q, phis, ubc_flux)
 
     use physconst,       only: avogad, rga
-    use physconst,     , only: rairv
+    use physconst,       only: rairv
     use constituents,    only: cnst_mw
 !------------------------------Arguments--------------------------------
     integer,  intent(in)  :: lchnk                 ! chunk identifier
