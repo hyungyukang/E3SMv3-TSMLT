@@ -85,7 +85,7 @@
 <so4_a2_ext_file      >atm/cam/chem/trop_mozart_aero/emis/DECK_ne30/cmip6_mam4_so4_a2_elev_1850-2014_c180205.nc </so4_a2_ext_file>
 
 <!-- Surface emissions for chemUCI-Linoz, MAM5, VBS SOA.  CMIP6 input4mips data -->
-<srf_emis_type        >CYCLICAL</srf_emis_type>
+<!--<srf_emis_type        >CYCLICAL</srf_emis_type>
 <srf_emis_cycle_yr    >1850</srf_emis_cycle_yr>
 <c2h4_emis_file       >atm/cam/chem/trop_mozart_aero/emis/chem_gases/2degrees/emissions-cmip6_e3sm_C2H4_surface_1850-2014_1.9x2.5_c20210323.nc </c2h4_emis_file>
 <c2h6_emis_file       >atm/cam/chem/trop_mozart_aero/emis/chem_gases/2degrees/emissions-cmip6_e3sm_C2H6_surface_1850-2014_1.9x2.5_c20210323.nc </c2h6_emis_file>
@@ -104,11 +104,11 @@
 <bc_a4_emis_file      >atm/cam/chem/trop_mozart_aero/emis/DECK_ne30/cmip6_mam4_bc_a4_surf_1850-2014_c180205.nc </bc_a4_emis_file>
 <mam7_num_a1_emis_file>atm/cam/chem/trop_mozart_aero/emis/DECK_ne30/cmip6_mam4_num_a1_surf_1850-2014_c180205.nc </mam7_num_a1_emis_file>
 <num_a2_emis_file     >atm/cam/chem/trop_mozart_aero/emis/DECK_ne30/cmip6_mam4_num_a2_surf_1850-2014_c180205.nc </num_a2_emis_file>
-<mam7_num_a3_emis_file>atm/cam/chem/trop_mozart_aero/emis/DECK_ne30/cmip6_mam4_num_a4_surf_1850-2014_c180205.nc </mam7_num_a3_emis_file> <!-- This is to set num_a4 emissions -->
+<mam7_num_a3_emis_file>atm/cam/chem/trop_mozart_aero/emis/DECK_ne30/cmip6_mam4_num_a4_surf_1850-2014_c180205.nc </mam7_num_a3_emis_file>
 <pom_a4_emis_file     >atm/cam/chem/trop_mozart_aero/emis/DECK_ne30/cmip6_mam4_pom_a4_surf_1850-2014_c180205.nc </pom_a4_emis_file>
 <so4_a1_emis_file     >atm/cam/chem/trop_mozart_aero/emis/DECK_ne30/cmip6_mam4_so4_a1_surf_1850-2014_c180205.nc </so4_a1_emis_file>
 <so4_a2_emis_file     >atm/cam/chem/trop_mozart_aero/emis/DECK_ne30/cmip6_mam4_so4_a2_surf_1850-2014_c180205.nc </so4_a2_emis_file>
-<e90_emis_file        >atm/cam/chem/trop_mozart_aero/emis/chem_gases/2degrees/emissions_E90_surface_1750-2015_1.9x2.5_c20210408.nc </e90_emis_file>
+<e90_emis_file        >atm/cam/chem/trop_mozart_aero/emis/chem_gases/2degrees/emissions_E90_surface_1750-2015_1.9x2.5_c20210408.nc </e90_emis_file>-->
 
 <!-- External forcing for BAM or MAM.  CMIP6 input4mips data -->
 <ext_frc_type         >CYCLICAL</ext_frc_type>
@@ -238,7 +238,7 @@
 
 
 
-<airpl_emis_file></airpl_emis_file>   <!-- need to be empty, but if specifying empty here, the value would be root of input_data_path -->
+<!--<airpl_emis_file></airpl_emis_file>-->   <!-- need to be empty, but if specifying empty here, the value would be root of input_data_path -->
 
 <!-- <tracer_cnst_filelist>this_field_is_not_used</tracer_cnst_filelist> -->
 <!--<tracer_cnst_type    >CYCLICAL</tracer_cnst_type>

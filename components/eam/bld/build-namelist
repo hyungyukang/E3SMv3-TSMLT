@@ -788,8 +788,8 @@ if ( (($chem ne 'none') && ($chem ne 'spa')) or ( $prog_species ) ){
     if ( $gas_drydep_list ) {
       add_default($nl, 'depvel_file' );
       add_default($nl, 'depvel_lnd_file' );
-      add_default($nl, 'clim_soilw_file' );
-      add_default($nl, 'season_wes_file' );
+#     add_default($nl, 'clim_soilw_file' );
+#     add_default($nl, 'season_wes_file' );
     }
 
     add_default($nl, 'lght_no_prd_factor' );
@@ -845,6 +845,12 @@ add_default($nl,'use_preexisting_ice');
 #Default value set by namelist_defaults_eam.xml, avoid setting a  default value false here.
 add_default($nl,'use_rad_dt_cosz');
 
+
+# set maximum solar zenith angle for photolysis
+my $maxzen = 116.;
+add_default($nl, 'photo_max_zen', 'val'=>"${maxzen}D0");
+
+
 #Approximate value of decay time at model top (days);
 #if 0., no rayleigh friction is applied
 add_default($nl, 'raytau0');
@@ -854,6 +860,12 @@ my $rad_pkg = $cfg->get('rad');
 if ($rad_pkg eq 'rrtmgp') {
   add_default($nl,'do_aerosol_rad');
   add_default($nl,'fixed_total_solar_irradiance');
+}
+
+
+# tropopause level used in gas-phase / aerosol processes
+if (($chem ne 'none') and ($chem ne 'terminator')) {
+  add_default($nl, 'chem_use_chemtrop');
 }
 
 #
@@ -953,6 +965,20 @@ if (defined $nl->get_value('solar_const') and
     }
 
 }
+
+# First check that solar_const and solar_data_file are not both defined
+if (defined $nl->get_value('solar_const') and
+    defined $nl->get_value('solar_irrad_data_file')) {
+
+    print "$ProgName - WARNING: It is not allowed to set both solar_const \n".
+          "            and solar_irrad_data_file.  solar_const will be ignored. \n";
+
+    if ($nl->delete_variable('solar_inparm', 'solar_const') != 0) {
+        die "$ProgName - ERROR: not able to delete solar_const from group solar_inparm.\n"
+    }
+
+}
+
 
 # TODO: should this include rrtmgp as well?
 if ($rad_pkg eq 'rrtmg' or $chem =~ /waccm_mozart/) {
@@ -2289,11 +2315,59 @@ if ($chem =~ /trop_mozart/ or $chem =~ /trop_strat/ or $chem =~ /tsmlt/ ) {
     foreach my $file (@files) {
 	add_default($nl, $file);
     }
-    unless (defined $nl->get_value('sad_type')) {
-	add_default($nl, 'sad_type',  'val'=>'CYCLICAL');
-	add_default($nl, 'sad_cycle_yr',  'val'=>'2000');
+    #unless (defined $nl->get_value('sad_type')) {
+#	add_default($nl, 'sad_type',  'val'=>'CYCLICAL');
+#	add_default($nl, 'sad_cycle_yr',  'val'=>'2000');
+#    }
+}
+
+
+
+if ($chem =~ /trop_mozart/ or $chem =~ /trop_strat/ or $chem =~ /tsmlt/) {
+
+    my $val;
+
+    if ($chem =~ /trop_mozart/) {
+      # Species with fixed stratosphere values
+      $val = "'O3','NO','NO2','HNO3','CO','CH4','N2O','N2O5'";
+      add_default($nl, 'fstrat_list', 'val'=>$val);
+      add_default($nl, 'fstrat_file');
+    }
+
+    # Species with fixed lower boundary
+    if ($chem =~ /_tsmlt_mam/ or $chem =~ /trop_strat/) {
+      $val = "'CCL4','CF2CLBR','CF3BR','CFC11','CFC113','CFC12','CH3BR','CH3CCL3','CH3CL','CH4','CO2'"
+            .",'H2','HCFC22','N2O','CFC114','CFC115','HCFC141B','HCFC142B','CH2BR2','CHBR3','H2402'";
+    } else {
+      $val = "'CH4','H2','N2O','CO2','CFC11','CFC12'";
+    }
+    if ($chem_has_ocs) {
+        $val .= ",'OCS'";
+    }
+    if (chem_has_species($cfg, 'SF6')) {
+        $val .= ",'SF6'";
+    }
+    add_default($nl, 'flbc_list', 'val'=>$val);
+    unless (defined $nl->get_value('flbc_type')) {
+        add_default($nl, 'flbc_type',  'val'=>'CYCLICAL');
+        add_default($nl, 'flbc_cycle_yr',  'val'=>'2000');
+    }
+
+    my @files;
+    # Datasets
+    if ($chem =~ /trop_strat/ or $chem =~ /waccm_tsmlt/) {
+       @files = ( 'soil_erod_file', 'flbc_file',
+                  'xs_coef_file','xs_short_file','xs_long_file', 'rsf_file' );
+    } else {
+       @files = ( 'soil_erod_file', 'flbc_file',
+                  'xs_coef_file','xs_short_file','xs_long_file', 'rsf_file', 'exo_coldens_file', 'sulf_file' );
+    }
+    foreach my $file (@files) {
+        add_default($nl, $file);
     }
 }
+
+
 
 # Prognostic aerosols via CAM-Chem package.
 # BAM settings
@@ -4170,9 +4244,9 @@ if ($chem =~ /waccm_ma/ or $chem =~ /tsmlt/) {
         add_default($nl, 'srf_emis_cycle_yr',  'val'=>'1997');
     }
 
-    if ($dyn eq 'fv') {
-        add_default($nl, 'do_circulation_diags', 'val'=>'.true.');
-    }
+    #if ($dyn eq 'fv') {
+    #    add_default($nl, 'do_circulation_diags', 'val'=>'.true.');
+    #}
 
     # max cross cap electric potential of 120 kV to keep WACCM stable through large geo-mag storms
     add_default($nl, 'efield_potential_max', 'val'=>'120.D0');
@@ -4326,7 +4400,7 @@ add_default($nl, 'convproc_method_activate');
 add_default($nl, 'regen_fix');
 add_default($nl, 'liqcf_fix');
 add_default($nl, 'ssalt_tuning');
-add_default($nl, 'sscav_tuning');
+#add_default($nl, 'sscav_tuning');
 add_default($nl, 'convproc_do_gas');
 add_default($nl, 'demott_ice_nuc');
 #BSINGH - ENDS
@@ -4691,6 +4765,28 @@ if ($chem =~ /_mam/ or $chem =~ /_bam/ or $chem =~ /trop_/) {
 	add_default($nl, 'dust_emis_fact');
     }
 }
+
+
+# Seasalt emissions tuning factor
+if ($chem =~ /_mam(\d)/) {
+    my $ver = undef;
+    if ($nl->get_value('modal_accum_coarse_exch') =~ /$TRUE/io) {
+        # Check for accumulation/coarse mode exchange.
+        $ver = 'strat';
+    }
+    elsif ($1 eq '7') {
+        # Check for mam7
+        $ver = 'mam7';
+    }
+    if (defined $ver) {
+        add_default($nl, 'seasalt_emis_scale', 'ver'=>$ver);
+    }
+    else {
+        add_default($nl, 'seasalt_emis_scale');
+    }
+}
+
+
 
 # Gravity wave drag settings
 if ($waccm_phys or $cfg->get('nlev') >= 60) {
