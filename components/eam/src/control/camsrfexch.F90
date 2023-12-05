@@ -82,6 +82,10 @@ module camsrfexch
      real(r8), allocatable :: tau_est(:)  ! stress estimated to be in equilibrium with ubot/vbot
      real(r8), allocatable :: ugust(:)    ! gustiness value
      real(r8), allocatable :: uovern(:)       ! ratio of wind speed/brunt vaisalla frequency  
+#ifdef TSMLT
+     real(r8), pointer, dimension(:) :: nhx_nitrogen_flx ! nitrogen deposition fluxes (kgN/m2/s)
+     real(r8), pointer, dimension(:) :: noy_nitrogen_flx ! nitrogen deposition fluxes (kgN/m2/s)
+#endif
   end type cam_out_t 
 
 !---------------------------------------------------------------------------
@@ -373,6 +377,9 @@ CONTAINS
 !
     integer :: c            ! chunk index
     integer :: ierror       ! Error code
+#ifdef TSMLT
+    character(len=*), parameter :: sub = 'hub2atm_alloc'
+#endif
     !----------------------------------------------------------------------- 
 
     if ( .not. phys_grid_initialized() ) call endrun( "ATM2HUB_ALLOC error: phys_grid not called yet" )
@@ -543,6 +550,23 @@ CONTAINS
        cam_out(c)%tau_est(:)  = 0._r8
        cam_out(c)%ugust(:)    = 0._r8
        cam_out(c)%uovern(:)   = 0._r8
+
+#ifdef TSMLT
+       nullify(cam_out(c)%nhx_nitrogen_flx)
+       nullify(cam_out(c)%noy_nitrogen_flx)
+
+       if (active_Faxa_nhx) then
+          allocate (cam_out(c)%nhx_nitrogen_flx(pcols), stat=ierror)
+          if ( ierror /= 0 ) call endrun(sub//': allocation error nhx_nitrogen_flx')
+          cam_out(c)%nhx_nitrogen_flx(:) = 0._r8
+       endif
+       if (active_Faxa_noy) then
+          allocate (cam_out(c)%noy_nitrogen_flx(pcols), stat=ierror)
+          if ( ierror /= 0 ) call endrun(sub//': allocation error noy_nitrogen_flx')
+          cam_out(c)%noy_nitrogen_flx(:) = 0._r8
+       endif
+#endif
+
     end do
 
   end subroutine atm2hub_alloc
