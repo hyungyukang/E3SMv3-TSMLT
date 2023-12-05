@@ -132,6 +132,15 @@ logical           :: pergro_test_active   = .false.    ! for invoking pergro tes
 integer           :: history_budget_histfile_num = 1   ! output history file number for budget fields
 logical           :: history_waccm        = .true.     ! output variables of interest for WACCM runs
 logical           :: history_clubb        = .true.     ! output default CLUBB-related variables
+#ifdef TSMLT
+logical           :: history_waccmx       = .false.    ! output variables of interest for WACCM-X runs
+logical           :: history_chemistry    = .true.     ! output default chemistry-related variables
+logical           :: history_carma        = .false.    ! output default CARMA-related variables
+logical           :: history_cesm_forcing = .false.
+logical           :: history_dust         = .false.
+logical           :: history_scwaccm_forcing = .false.
+logical           :: history_chemspecies_srf = .false.
+#endif
 logical           :: do_clubb_sgs
 logical           :: do_shoc_sgs
 logical           :: do_aerocom_ind3      = .false.    ! true to write aerocom
@@ -595,6 +604,10 @@ subroutine phys_getopts(deep_scheme_out, shallow_scheme_out, eddy_scheme_out, &
                         UCIgaschmbudget_2D_L3_s_out, UCIgaschmbudget_2D_L3_e_out, UCIgaschmbudget_2D_L4_s_out, UCIgaschmbudget_2D_L4_e_out, &
                         history_budget_histfile_num_out, history_waccm_out, &
                         history_clubb_out, ieflx_opt_out, conv_water_in_rad_out, cam_chempkg_out, &
+#ifdef TSMLT
+                        history_waccmx_out,history_chemistry_out,history_carma_out,history_chemspecies_srf_out,&
+                        history_dust_out,history_cesm_forcing_out,history_scwaccm_forcing_out, &
+#endif
                         prog_modal_aero_out, macrop_scheme_out, ideal_phys_option_out, &
                         use_MMF_out, use_ECPP_out, MMF_microphysics_scheme_out, &
                         MMF_orientation_angle_out, use_MMF_VT_out, MMF_VT_wn_max_out, use_MMF_ESMT_out, &
@@ -678,6 +691,15 @@ subroutine phys_getopts(deep_scheme_out, shallow_scheme_out, eddy_scheme_out, &
    integer,           intent(out), optional :: history_budget_histfile_num_out
    logical,           intent(out), optional :: history_waccm_out
    logical,           intent(out), optional :: history_clubb_out
+#ifdef TSMLT
+   logical,           intent(out), optional :: history_waccmx_out
+   logical,           intent(out), optional :: history_chemistry_out
+   logical,           intent(out), optional :: history_carma_out
+   logical,           intent(out), optional :: history_cesm_forcing_out
+   logical,           intent(out), optional :: history_chemspecies_srf_out
+   logical,           intent(out), optional :: history_dust_out
+   logical,           intent(out), optional :: history_scwaccm_forcing_out
+#endif
    logical,           intent(out), optional :: do_clubb_sgs_out
    logical,           intent(out), optional :: do_shoc_sgs_out
    logical,           intent(out), optional :: do_aerocom_ind3_out
@@ -784,6 +806,15 @@ subroutine phys_getopts(deep_scheme_out, shallow_scheme_out, eddy_scheme_out, &
    if ( present(history_budget_histfile_num_out ) ) history_budget_histfile_num_out = history_budget_histfile_num
    if ( present(history_waccm_out       ) ) history_waccm_out        = history_waccm
    if ( present(history_clubb_out       ) ) history_clubb_out        = history_clubb
+#ifdef TSMLT
+   if ( present(history_waccmx_out      ) ) history_waccmx_out       = history_waccmx
+   if ( present(history_chemistry_out   ) ) history_chemistry_out    = history_chemistry
+   if ( present(history_cesm_forcing_out) ) history_cesm_forcing_out = history_cesm_forcing
+   if ( present(history_chemspecies_srf_out) ) history_chemspecies_srf_out = history_chemspecies_srf
+   if ( present(history_scwaccm_forcing_out) ) history_scwaccm_forcing_out = history_scwaccm_forcing
+   if ( present(history_carma_out       ) ) history_carma_out        = history_carma
+   if ( present(history_dust_out        ) ) history_dust_out         = history_dust
+#endif
    if ( present(do_clubb_sgs_out        ) ) do_clubb_sgs_out         = do_clubb_sgs
    if ( present(do_shoc_sgs_out        ) ) do_shoc_sgs_out         = do_shoc_sgs
    if ( present(do_aerocom_ind3_out ) ) do_aerocom_ind3_out = do_aerocom_ind3
