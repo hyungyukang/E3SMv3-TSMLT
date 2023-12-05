@@ -36,6 +36,11 @@ module constituents
   public cnst_chk_dim         ! check that number of constituents added equals dimensions (pcnst)
   public cnst_cam_outfld      ! Returns true if default CAM output was specified in the cnst_add calls.
   public setup_moist_indices  ! sets indices for 4 water forms
+#ifdef TSMLT
+  public cnst_set_spec_class  ! Sets the type of species class
+  public cnst_is_a_water_species ! Returns true for constituents identified as water species
+  public cnst_set_convtran2   ! Override for convtran2 values set by the cnst_add routine
+#endif
 
 ! Public data
 
@@ -50,6 +55,21 @@ module constituents
 !water form indices
   integer, public, protected :: icldice = -1, icldliq = -1, irain = -1, isnow = -1
 
+
+#ifdef TSMLT
+  integer, public, parameter :: cnst_spec_class_undefined   = 0
+  integer, public, parameter :: cnst_spec_class_cldphysics  = 1
+  integer, public, parameter :: cnst_spec_class_aerosol     = 2
+  integer, public, parameter :: cnst_spec_class_gas         = 3
+  integer, public, parameter :: cnst_spec_class_other       = 4
+
+!
+! Constants for each tracer
+
+integer, public, protected :: cnst_species_class(pcnst) = cnst_spec_class_undefined  ! indicates species class &
+                                                                                       ! (cldphysics, aerosol, gas )
+#endif
+
 !
 ! Constants for each tracer
   real(r8),    public :: cnst_cp  (pcnst)          ! specific heat at constant pressure (J/kg/K)
@@ -63,6 +83,9 @@ module constituents
   logical,     public :: cnst_fixed_ubc(pcnst) = .false.  ! upper bndy condition = fixed ?
   logical,     public :: cnst_fixed_ubflx(pcnst) = .false.! upper boundary non-zero fixed constituent flux
   logical,     public :: cnst_is_convtran1(pcnst) = .false.  ! convective transport : phase 1 or phase 2?
+#ifdef TSMLT
+  logical,     public :: cnst_is_convtran2(pcnst) = .false.  ! doconvective transport in phase 2
+#endif
 
 !++bee - temporary... These names should be declared in the module that makes the addfld and outfld calls.
 ! Lists of tracer names and diagnostics
@@ -204,6 +227,72 @@ CONTAINS
 
     return
   end subroutine cnst_add
+
+#ifdef TSMLT
+!----------------------------------------------------------------------------------------------
+
+subroutine cnst_set_convtran2(ind, is_convtran2)
+
+   ! Allow user to override the value of cnst_is_convtran2 set by a previous cnst_add call.
+
+   integer, intent(in) :: ind          ! global constituent index (in q array)
+   logical, intent(in) :: is_convtran2 ! true => convect in convtran2
+
+   character(len=*), parameter :: sub = 'cnst_set_convtran2'
+   character(len=128)          :: errmsg
+   !-----------------------------------------------------------------------
+
+   ! check index
+   if (ind <= 0 .or. ind > padv) then
+      write(errmsg,*) sub//': FATAL: bad tracer index: padv, ind = ', padv, ind
+      call endrun(errmsg)
+   end if
+
+   ! Set flag for convective transport after wetdep (phase 2).
+   cnst_is_convtran2(ind) = is_convtran2
+
+   ! consistency check -- It is OK to completely turn off the tracer convection by setting
+   ! both cnst_is_convtran1 and cnst_is_convtran2 to FALSE.  But it is an error to
+   ! have both set TRUE.
+   if (cnst_is_convtran1(ind) .and. cnst_is_convtran2(ind)) then
+      call endrun(sub//': FATAL: cannot set both cnst_is_convtran1 and cnst_is_convtran2 to TRUE')
+   end if
+
+end subroutine cnst_set_convtran2
+
+!----------------------------------------------------------------------------------------------
+
+subroutine cnst_set_spec_class(ind, cnst_spec_class_in)
+
+   ! Allow user to override the value of cnst_spec_class set by a previous cnst_add call.
+
+   integer, intent(in) :: ind                ! global constituent index (in q array)
+   integer, intent(in) :: cnst_spec_class_in ! species class designator
+
+   character(len=*), parameter :: subname = 'cnst_set_spec_class'
+   !-----------------------------------------------------------------------
+
+   ! check index
+    if (ind <= 0 .or. ind > padv) then
+       write(iulog,*) subname//': illegal tracer index: padv, ind = ', padv, ind
+       call endrun(subname//': illegal tracer index')
+    end if
+
+    ! Check designator
+    if (cnst_spec_class_in /= cnst_spec_class_undefined  .and. &
+        cnst_spec_class_in /= cnst_spec_class_cldphysics .and. &
+        cnst_spec_class_in /= cnst_spec_class_aerosol    .and. &
+        cnst_spec_class_in /= cnst_spec_class_gas        .and. &
+        cnst_spec_class_in /= cnst_spec_class_other ) then
+          write(iulog,*) subname//': trying to use invalid cnst_spec_class designator', cnst_spec_class_in
+          call endrun(subname//': invalid cnst_spec_class designator')
+    end if
+
+    ! Set flag for convective transport after wetdep (phase 2).
+    cnst_species_class(ind) = cnst_spec_class_in
+
+ end subroutine cnst_set_spec_class
+#endif
 
 !==============================================================================
 
@@ -449,8 +538,33 @@ subroutine setup_moist_indices()
    call cnst_get_ind('RAINQM', irain, abrtf=.false.)
    call cnst_get_ind('SNOWQM', isnow, abrtf=.false.)
 
- end subroutine setup_moist_indices
+end subroutine setup_moist_indices
 
+#ifdef TSMLT
+
+!==============================================================================
+
+pure logical function cnst_is_a_water_species(name)
+
+   ! test whether the input name matches the name of a water species
+
+   character(len=*), intent(in) :: name
+   !-------------------------------------------------------------------------
+
+   cnst_is_a_water_species = .false.
+
+   if (name == 'Q'      .or. &
+       name == 'CLDLIQ' .or. &
+       name == 'CLDICE' .or. &
+       name == 'RAINQM' .or. &
+       name == 'SNOWQM' .or. &
+       name == 'GRAUQM'      ) cnst_is_a_water_species = .true.
+
+end function cnst_is_a_water_species
+
+!==============================================================================
+
+#endif
 
 
 end module constituents

@@ -1922,6 +1922,26 @@ logical function phys_grid_initialized ()
    return
    end function get_ncols_p
 !
+#ifdef TSMLT
+!========================================================================
+
+   subroutine get_grid_dims(hdim1_d_out, hdim2_d_out)
+      use cam_abortutils, only: endrun
+      ! retrieve dynamics field grid information
+      ! hdim1_d and hdim2_d are dimensions of rectangular horizontal grid
+      ! data structure, If 1D data structure, then hdim2_d == 1.
+      integer, intent(out) :: hdim1_d_out
+      integer, intent(out) :: hdim2_d_out
+
+      if (.not. phys_grid_initialized()) then
+         call endrun('get_grid_dims: physics grid not initialized')
+      end if
+      hdim1_d_out = hdim1_d
+      hdim2_d_out = hdim2_d
+
+   end subroutine get_grid_dims
+#endif
+!
 !========================================================================
 !
    subroutine get_lat_all_p(lcid, latdim, lats)

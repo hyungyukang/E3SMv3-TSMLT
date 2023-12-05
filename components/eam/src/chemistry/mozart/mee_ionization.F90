@@ -113,9 +113,9 @@ contains
   !-----------------------------------------------------------------------------
   subroutine mee_ionpairs(ncol, lchnk, pmid, alt, temp, ionpairs)
 
-    use air_composition, only: mbarv  ! kg/kmole
+    use physconst,       only: mbarv  ! kg/kmole
     use physconst,       only: gravit
-    use air_composition, only: rairv  ! composition dependent gas constant (J/K/kg)
+    use physconst,       only: rairv  ! composition dependent gas constant (J/K/kg)
     use physconst,       only: boltz  ! Boltzman's constant (J/K/molecule)
     use physconst,       only: avogad ! Avogadro's number (molecules/kmole)
     use physconst,       only: rearth ! radius of earth (m)

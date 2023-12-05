@@ -251,7 +251,8 @@ contains
   !-----------------------------------------------------------------------------
   function interp_ionpairs( ncol, lchnk, pmid, temp, input ) result( ionpairs )
     use interpolate_data, only : lininterp, lininterp_init, lininterp_finish, extrap_method_zero, interp_type
-    use air_composition,  only : rairv
+    !use air_composition,  only : rairv
+    use physconst,        only : rairv
     use cam_history,      only : outfld
 
     integer,  intent(in) :: ncol, lchnk
