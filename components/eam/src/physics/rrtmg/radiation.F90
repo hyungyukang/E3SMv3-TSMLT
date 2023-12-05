@@ -23,7 +23,7 @@ use time_manager,    only: get_nstep, is_first_restart_step
 use cam_abortutils,      only: endrun
 use error_messages,  only: handle_err
 use cam_control_mod, only: lambm0, obliqr, mvelpp, eccen
-use scamMod,         only: scm_crm_mode, single_column,have_cld,cldobs,&
+use iop_data_mod,    only: single_column,have_cld,cldobs,&
                            have_clwp,clwpobs,have_tg,tground
 use perf_mod,        only: t_startf, t_stopf
 use cam_logfile,     only: iulog
@@ -684,7 +684,7 @@ end function radiation_nextsw_cday
     end do
 
 
-    if (single_column .and. scm_crm_mode) then
+    if (single_column) then
        call add_default ('FUS     ', 1, ' ')
        call add_default ('FUSC    ', 1, ' ')
        call add_default ('FDS     ', 1, ' ')
@@ -754,7 +754,7 @@ end function radiation_nextsw_cday
     call addfld('EMIS', (/ 'lev' /), 'A', '1', 'Cloud longwave emissivity', &
                 sampling_seq='rad_lwsw', flag_xyfill=.true.)
 
-    if (single_column.and.scm_crm_mode) then
+    if (single_column) then
        call add_default ('FUL     ', 1, ' ')
        call add_default ('FULC    ', 1, ' ')
        call add_default ('FDL     ', 1, ' ')
@@ -1116,7 +1116,7 @@ end function radiation_nextsw_cday
     end if
    
 !  For CRM, make cloud equal to input observations:
-    if (single_column.and.scm_crm_mode.and.have_cld) then
+    if (single_column.and.have_cld) then
        do k = 1,pver
           cld(:ncol,k)= cldobs(k)
        enddo
@@ -1157,7 +1157,7 @@ end function radiation_nextsw_cday
        r_state => rrtmg_state_create( state, cam_in )
 
        ! For CRM, make cloud liquid water path equal to input observations
-       if(single_column.and.scm_crm_mode.and.have_clwp)then
+       if(single_column.and.have_clwp)then
           call endrun('cloud water path must be passed through radiation interface')
           !do k=1,pver
           !   cliqwp(:ncol,k) = clwpobs(k)
@@ -1454,7 +1454,7 @@ end function radiation_nextsw_cday
           !
           do i=1,ncol
              lwupcgs(i) = cam_in%lwup(i)*1000._r8
-             if(single_column.and.scm_crm_mode.and.have_tg) &
+             if(single_column.and.have_tg) &
                   lwupcgs(i) = 1000*stebol*tground(1)**4
           end do
 
