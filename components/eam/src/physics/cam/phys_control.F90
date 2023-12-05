@@ -541,6 +541,7 @@ subroutine phys_ctl_readnl(nlfile)
                       .or. cam_chempkg_is('trop_strat_mam3') &
                       .or. cam_chempkg_is('trop_strat_mam4_resus_mom_soag') &
                       .or. cam_chempkg_is('trop_strat_mam7') &
+                      .or. cam_chempkg_is('tsmlt_mam4') &
                       .or. cam_chempkg_is('waccm_mozart_mam3'))
 
    ! Checks when generating output needed to force a prescribed aerosol run		      
