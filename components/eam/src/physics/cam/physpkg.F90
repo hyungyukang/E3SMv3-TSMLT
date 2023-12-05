@@ -51,7 +51,7 @@ module physpkg
   use chem_mods,    only : gas_pcnst
   use mo_tracname,  only : solsym
   use mo_chm_diags, only : aer_species
-  use mo_gas_phase_chemdr, only : gas_ac_name, gas_ac_name_2D
+! use mo_gas_phase_chemdr, only : gas_ac_name, gas_ac_name_2D
 
   use check_energy,    only: nstep_ignore_diagn1, nstep_ignore_diagn2, &
                              check_energy_gmean, check_energy_gmean_additional_diagn, &
@@ -175,7 +175,7 @@ subroutine phys_register
     use subcol,             only: subcol_register
     use subcol_utils,       only: is_subcol_on
     use output_aerocom_aie, only: output_aerocom_aie_register, do_aerocom_ind3
-    use mo_chm_diags,       only: chm_diags_inti_ac
+!   use mo_chm_diags,       only: chm_diags_inti_ac
 
     !---------------------------Local variables-----------------------------
     !
@@ -289,28 +289,32 @@ subroutine phys_register
        endif
 
        ! register chemical constituents including aerosols ...
+#ifdef TSMLT
+       call chem_register()
+#else
        call chem_register(species_class)
+#endif
 
        ! NB: has to be after chem_register to use tracer names
        ! Fields for gas chemistry tracers
-       if (history_gaschmbudget .or. history_gaschmbudget_2D .or. history_gaschmbudget_2D_levels &
-            .or. history_chemdyg_summary) then
-         call chm_diags_inti_ac() ! to get aer_species
-         do m = 1,gas_pcnst
-            if (.not. any( aer_species == m )) then
-              spc_name = trim(solsym(m))
-              if (history_gaschmbudget .or. history_gaschmbudget_2D_levels .or. history_chemdyg_summary) then
-                gas_ac_name(m) = 'ac_'//spc_name
-                call pbuf_add_field(gas_ac_name(m), 'global', dtype_r8, (/pcols,pver/), gas_ac_idx)
-              end if
+!      if (history_gaschmbudget .or. history_gaschmbudget_2D .or. history_gaschmbudget_2D_levels &
+!           .or. history_chemdyg_summary) then
+!        call chm_diags_inti_ac() ! to get aer_species
+!        do m = 1,gas_pcnst
+!           if (.not. any( aer_species == m )) then
+!             spc_name = trim(solsym(m))
+!             if (history_gaschmbudget .or. history_gaschmbudget_2D_levels .or. history_chemdyg_summary) then
+!               gas_ac_name(m) = 'ac_'//spc_name
+!               call pbuf_add_field(gas_ac_name(m), 'global', dtype_r8, (/pcols,pver/), gas_ac_idx)
+!             end if
 
-              if (history_gaschmbudget_2D .or. history_chemdyg_summary) then
-                gas_ac_name_2D(m) = 'ac_2D_'//spc_name
-                call pbuf_add_field(gas_ac_name_2D(m), 'global', dtype_r8, (/pcols/), gas_ac_idx)
-              end if
-            end if
-         enddo
-       end if
+!             if (history_gaschmbudget_2D .or. history_chemdyg_summary) then
+!               gas_ac_name_2D(m) = 'ac_2D_'//spc_name
+!               call pbuf_add_field(gas_ac_name_2D(m), 'global', dtype_r8, (/pcols/), gas_ac_idx)
+!             end if
+!           end if
+!        enddo
+!      end if
 
        ! co2 constituents
        call co2_register()
@@ -876,7 +880,11 @@ subroutine phys_init( phys_state, phys_tend, pbuf2d, cam_out )
 
     ! Prognostic chemistry.
     call t_startf ('chem_init')
+#ifdef TSMLT
+    call chem_init(phys_state,pbuf2d)
+#else
     call chem_init(phys_state,pbuf2d, species_class)
+#endif
     call t_stopf ('chem_init')
 
     ! Prescribed tracers
@@ -885,12 +893,20 @@ subroutine phys_init( phys_state, phys_tend, pbuf2d, cam_out )
     call prescribed_aero_init()
     call read_spa_data_init()
     call aerodep_flx_init()
+#ifdef TSMLT
+    call aircraft_emit_init()
+#else
     call aircraft_emit_init(phys_state,pbuf2d)
+#endif
     !when is_cmip6_volc is true ,cmip6 style volcanic file is read
     !Initialized to .false. here but it gets its values from prescribed_volcaero_init
     is_cmip6_volc = .false. 
     call t_startf ('prescribed_volcaero_init')
+#ifdef TSMLT
+    call prescribed_volcaero_init()
+#else
     call prescribed_volcaero_init(is_cmip6_volc)
+#endif
     call t_stopf ('prescribed_volcaero_init')
 
     ! Initialize ocean data
@@ -927,7 +943,11 @@ subroutine phys_init( phys_state, phys_tend, pbuf2d, cam_out )
     call tsinti(tmelt, latvap, rair, stebol, latice)
 
     call t_startf ('radiation_init')
+#ifdef TSMLT
+    call radiation_init(phys_state)
+#else
     call radiation_init(phys_state,pbuf2d)
+#endif
     call t_stopf ('radiation_init')
 
     call rad_solar_var_init()
@@ -1002,7 +1022,11 @@ subroutine phys_init( phys_state, phys_tend, pbuf2d, cam_out )
        ! here.  For prognostic MAM the initialization is called from
        ! modal_aero_initialize
        if (.not. prog_modal_aero) then
+#ifdef TSMLT
+          call modal_aero_calcsize_init(pbuf2d)
+#else
           call modal_aero_calcsize_init(pbuf2d, species_class)
+#endif
        endif
 
        call modal_aero_wateruptake_init(pbuf2d)
@@ -1579,7 +1603,11 @@ subroutine tphysac (ztodt,   cam_in,  &
     use cam_control_mod,    only: aqua_planet 
     use mo_gas_phase_chemdr,only: map2chm
     use clybry_fam,         only: clybry_fam_set
+#ifdef TSMLT
+    use charge_neutrality,  only: charge_balance,charge_fix
+#else
     use charge_neutrality,  only: charge_fix
+#endif
     use qbo,                only: qbo_relax
     use iondrag,            only: iondrag_calc, do_waccm_ions
     use clubb_intr,         only: clubb_surface
@@ -1803,8 +1831,13 @@ if (l_tracer_aero) then
 
     ! Chemistry calculation
     if (chem_is_active()) then
+#ifdef TSMLT
+       call chem_timestep_tend(state, ptend, cam_in, cam_out, ztodt, &
+            pbuf,  fh2o)
+#else
        call chem_timestep_tend(state, ptend, cam_in, cam_out, ztodt, &
             pbuf,  fh2o, fsds)
+#endif
 
        call physics_update(state, ptend, ztodt, tend)
        call check_energy_chng(state, tend, "chem", nstep, ztodt, fh2o, zero, zero, zero)
@@ -2997,10 +3030,16 @@ end if
          endif
 
          ! Aerosol wet removal (including aerosol water uptake)
+#ifdef TSMLT
+         call aero_model_wetdep( state, ztodt, dlf, cam_out, ptend, pbuf, &
+                 mu, md, du, eu, ed, dp, dsubcld, &
+                 jt, maxg, ideep, lengath )
+#else
          call aero_model_wetdep( ztodt, dlf, dlf2, cmfmc2, state,  & ! inputs
                 sh_e_ed_ratio, mu, md, du, eu, ed, dp, dsubcld,    &
                 jt, maxg, ideep, lengath, species_class,           &
                 cam_out, pbuf, ptend)                      ! outputs
+#endif
          call physics_update(state, ptend, ztodt, tend)
 
          ! deep convective aerosol transport
@@ -3133,7 +3172,7 @@ subroutine phys_timestep_init(phys_state, cam_out, pbuf2d)
   use radheat,             only: radheat_timestep_init
   use solar_data,          only: solar_data_advance
   use qbo,                 only: qbo_timestep_init
-  use efield,              only: get_efield
+! use efield,              only: get_efield
   use iondrag,             only: do_waccm_ions
   use perf_mod
 
@@ -3208,12 +3247,12 @@ subroutine phys_timestep_init(phys_state, cam_out, pbuf2d)
   !----------------------------------------------------------------------
   call qbo_timestep_init
 
-  if (do_waccm_ions) then
-     ! Compute the electric field
-     call t_startf ('efield')
-     call get_efield
-     call t_stopf ('efield')
-  endif
+! if (do_waccm_ions) then
+!    ! Compute the electric field
+!    call t_startf ('efield')
+!    call get_efield
+!    call t_stopf ('efield')
+! endif
 
   ! Time interpolate for tracers, if appropriate
   call tracers_timestep_init(phys_state)
