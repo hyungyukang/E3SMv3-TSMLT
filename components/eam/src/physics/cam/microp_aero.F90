@@ -59,6 +59,7 @@ private
 save
 
 public :: microp_aero_init, microp_aero_run, microp_aero_readnl, microp_aero_register
+public :: microp_aero_final
 public :: aerosol_state_object
 public :: aerosol_properties_object
 
@@ -354,6 +355,49 @@ subroutine microp_aero_init
 end subroutine microp_aero_init
 
 !=========================================================================================
+! returns a pointer to an aerosol state object for a given chunk index
+function aerosol_state_object(lchnk) result(obj)
+
+  integer,intent(in) :: lchnk ! local chunk index
+  class(aerosol_state), pointer :: obj ! aerosol state object pointer for local chunk
+
+  obj => aero_state(lchnk)%obj
+
+end function aerosol_state_object
+
+!=========================================================================================
+! returns a pointer to an aerosol properties object
+function aerosol_properties_object() result(obj)
+
+  class(aerosol_properties), pointer :: obj ! aerosol properties object pointer
+
+  obj => aero_props_obj
+
+end function aerosol_properties_object
+!=========================================================================================
+
+subroutine microp_aero_final
+
+  use ppgrid,           only: begchunk, endchunk
+
+  integer :: c
+
+  if (associated(aero_props_obj)) then
+     deallocate(aero_props_obj)
+  end if
+  nullify(aero_props_obj)
+
+  if (associated(aero_state)) then
+     do c = begchunk,endchunk
+        deallocate(aero_state(c)%obj)
+     end do
+     deallocate(aero_state)
+     nullify(aero_state)
+  end if
+
+end subroutine microp_aero_final
+
+!=========================================================================================
 
 subroutine microp_aero_readnl(nlfile)
 
@@ -427,6 +471,9 @@ subroutine microp_aero_run ( &
    integer :: nmodes
    real(r8):: dst1_num_to_mass 
 
+   type(physics_state), target :: state1                ! Local copy of state variable
+   type(physics_ptend) :: ptend_loc
+
    real(r8), pointer :: ast(:,:)        
    real(r8), pointer :: alst(:,:)        
    real(r8), pointer :: aist(:,:)        
@@ -496,7 +543,11 @@ subroutine microp_aero_run ( &
    real(r8) :: wght
 
    real(r8), allocatable :: factnum(:,:,:) ! activation fraction for aerosol number
+
+   class(aerosol_state), pointer :: aero_state1_obj
+
    !-------------------------------------------------------------------------------
+   nullify(aero_state1_obj)
 
    associate( &
       lchnk => state%lchnk,             &
@@ -532,6 +583,12 @@ subroutine microp_aero_run ( &
    call pbuf_get_field(pbuf, rndst_idx, rndst)
 
    if (clim_modal_aero) then
+
+      ! create an aerosol state object specifically for cam state1
+      aero_state1_obj => modal_aerosol_state( state1, pbuf )
+      if (.not.associated(aero_state1_obj)) then
+         call endrun('microp_aero_run: construction of aero_state1_obj modal_aerosol_state object failed')
+      end if
 
       itim_old = pbuf_old_tim_idx()
       
@@ -753,7 +810,7 @@ subroutine microp_aero_run ( &
                else
                   lcldn(i,k) = cldn(i,k)*qc(i,k)/qcld
                   lcldo(i,k) = cldo(i,k)*qc(i,k)/qcld
-                  cldliqf(i,k) = state1%q(i,k,cldliq_idx)/qcld
+                  cldliqf(i,k) = qc(i,k)/qcld
                endif
             end if
          end do
@@ -767,12 +824,12 @@ subroutine microp_aero_run ( &
 !        lcldn, lcldo, nctend_mixnuc, factnum)
       if (use_preexisting_ice) then
          call dropmixnuc( aero_props_obj, aero_state1_obj, &
-              state1, ptend_loc, deltatin, pbuf, wsub, &
+              state, ptend_loc, deltatin, pbuf, wsub, &
               cldn, cldo, cldliqf, nctend_mixnuc, factnum)
       else
          cldliqf = 1._r8
          call dropmixnuc( aero_props_obj, aero_state1_obj, &
-              state1, ptend_loc, deltatin, pbuf, wsub, &
+              state, ptend_loc, deltatin, pbuf, wsub, &
               lcldn, lcldo, cldliqf, nctend_mixnuc, factnum)
       end if
       call t_stopf('dropmixnuc')
