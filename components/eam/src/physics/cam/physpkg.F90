@@ -3218,11 +3218,13 @@ subroutine phys_timestep_init(phys_state, cam_out, pbuf2d)
   call prescribed_volcaero_adv(phys_state, pbuf2d)
   call t_stopf('prescribed_volcaero_adv')
 
+#ifndef TSMLT
   if (has_mam_mom) then
      call t_startf('advance_ocean_data')
      call advance_ocean_data(phys_state, pbuf2d)
      call t_stopf('advance_ocean_data')
   end if
+#endif
 
   ! prescribed aerosol deposition fluxes
   call aerodep_flx_adv(phys_state, pbuf2d, cam_out)
@@ -3247,15 +3249,19 @@ subroutine phys_timestep_init(phys_state, cam_out, pbuf2d)
   !----------------------------------------------------------------------
   call qbo_timestep_init
 
-! if (do_waccm_ions) then
-!    ! Compute the electric field
-!    call t_startf ('efield')
-!    call get_efield
-!    call t_stopf ('efield')
-! endif
+#ifndef TSMLT
+  if (do_waccm_ions) then
+     ! Compute the electric field
+     call t_startf ('efield')
+     call get_efield
+     call t_stopf ('efield')
+  endif
+#endif
 
+#ifndef TSMLT
   ! Time interpolate for tracers, if appropriate
   call tracers_timestep_init(phys_state)
+#endif
 
   ! age of air tracers
   call aoa_tracers_timestep_init(phys_state)

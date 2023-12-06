@@ -254,7 +254,11 @@ contains
    use clubb_intr,          only: clubb_readnl
    use shoc_intr,           only: shoc_readnl
    use chemistry,           only: chem_readnl
-!  use lin_strat_chem,      only: linoz_readnl
+#ifdef TSMLT
+   use prescribed_strataero,only: prescribed_strataero_readnl
+#else
+   use lin_strat_chem,      only: linoz_readnl
+#endif
    use prescribed_volcaero, only: prescribed_volcaero_readnl
    use aerodep_flx,         only: aerodep_flx_readnl
    use solar_data,          only: solar_data_readnl
@@ -279,6 +283,9 @@ contains
 #endif
    use radiation,           only: radiation_readnl
    use conditional_diag,    only: cnd_diag_readnl
+#ifdef TSMLT
+   use rate_diags,          only: rate_diags_readnl
+#endif
 
 !---------------------------Arguments-----------------------------------
 
@@ -516,6 +523,9 @@ contains
    call rad_data_readnl(nlfilename)
    call modal_aer_opt_readnl(nlfilename)
    call chem_readnl(nlfilename)
+#ifdef TSMLT
+   call prescribed_strataero_readnl(nlfilename)
+#endif
 !  call linoz_readnl(nlfilename)
    call prescribed_volcaero_readnl(nlfilename)
    call solar_data_readnl(nlfilename)
@@ -541,6 +551,10 @@ contains
 
    ! Read radiation namelist
    call radiation_readnl(nlfilename, dtime_in=dtime)
+
+#ifdef TSMLT
+   call rate_diags_readnl(nlfilename)
+#endif
 
    ! Print cam_inparm input variables to standard output
    if (masterproc) then

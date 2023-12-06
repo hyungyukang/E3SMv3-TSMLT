@@ -67,6 +67,7 @@
 <history_aerosol    >.true.</history_aerosol>
 <history_aero_optics>.true.</history_aero_optics>
 
+<soil_erod_file      >atm/cam/dst/dst_source2x2tunedcam6-2x2-04062017.nc</soil_erod_file>
 
 
 <!-- External forcing for BAM or MAM.  CMIP6 input4mips data -->
@@ -236,6 +237,9 @@
 
 
 
+<electron_file>atm/waccm/phot/electron_121129.dat</electron_file>
+<photon_file>atm/waccm/phot/photon_c130710.dat</photon_file>
+<euvac_file>atm/waccm/phot/EUVAC_reference_c170222.nc</euvac_file>
 
 
 <!--<airpl_emis_file></airpl_emis_file>-->   <!-- need to be empty, but if specifying empty here, the value would be root of input_data_path -->
