@@ -49,6 +49,7 @@ contains
     i=1
     j=1
     do while( len_trim(sums(i)) > 0 )
+       !write(*,*), i, len_trim(sums(i))
 
        k = scan(sums(i), '+', back=.true. )
        more_to_come = k == len_trim(sums(i)) ! line ends with "+"

@@ -124,7 +124,6 @@ contains
     hno3_ndx = get_spc_ndx('HNO3')
     hcl_ndx  = get_spc_ndx('HCL')
     call cnst_get_ind( 'CLDICE', cldice_ndx )
-    !call cnst_get_ind( 'SNOWQM', snow_ndx, abort=.false. )
     call cnst_get_ind( 'SNOWQM', snow_ndx, abrtf=.false. )
 
     if (o3_ndx>0 .or. o3_inv_ndx>0) then
