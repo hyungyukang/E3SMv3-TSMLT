@@ -2578,9 +2578,13 @@ end subroutine ma_convproc_tend
 !         naerosol, ntot_amode, vaerosol, hygro,                            &
 !         fn, fm, fluxn, fluxm, flux_fullact                                )
 !#else
+!  call activate_aerosol(                                                    &
+!        wbar, sigw, wdiab, wminf, wmaxf, tair, rhoair,                    &
+!        naerosol, ntot_amode, vaerosol, hygro, aero_props_obj,            &
+!        fn, fm, fluxn, fluxm, flux_fullact                                )
    call activate_aerosol(                                                    &
          wbar, sigw, wdiab, wminf, wmaxf, tair, rhoair,                    &
-         naerosol, ntot_amode, vaerosol, hygro, aero_props_obj,            &
+         naerosol, ntot_amode, vaerosol, hygro,                            &
          fn, fm, fluxn, fluxm, flux_fullact                                )
 !#endif
 
@@ -2867,9 +2871,13 @@ end subroutine ma_convproc_tend
 !         naerosol, ntot_amode, vaerosol, hygro,                            &
 !         fn, fm, fluxn, fluxm, flux_fullact                                )
 !#else
+!     call activate_aerosol(                                                 &
+!        wbar, sigw, wdiab, wminf, wmaxf, tair, rhoair,                    &
+!        naerosol, ntot_amode, vaerosol, hygro, aero_props_obj,            &
+!        fn, fm, fluxn, fluxm, flux_fullact                                )
       call activate_aerosol(                                                 &
          wbar, sigw, wdiab, wminf, wmaxf, tair, rhoair,                    &
-         naerosol, ntot_amode, vaerosol, hygro, aero_props_obj,            &
+         naerosol, ntot_amode, vaerosol, hygro,                            &
          fn, fm, fluxn, fluxm, flux_fullact                                )
 !#endif
 
@@ -2884,9 +2892,13 @@ end subroutine ma_convproc_tend
 !         naerosol, ntot_amode, vaerosol, hygro,                            &
 !         fn, fm, fluxn, fluxm, flux_fullact, smax_prescribed               )
 !#else
+!     call activate_aerosol(                                                 &
+!        wbar, sigw, wdiab, wminf, wmaxf, tair, rhoair,                    &
+!        naerosol, ntot_amode, vaerosol, hygro, aero_props_obj,            &
+!        fn, fm, fluxn, fluxm, flux_fullact, smax_prescribed               )
       call activate_aerosol(                                                 &
          wbar, sigw, wdiab, wminf, wmaxf, tair, rhoair,                    &
-         naerosol, ntot_amode, vaerosol, hygro, aero_props_obj,            &
+         naerosol, ntot_amode, vaerosol, hygro,                            &
          fn, fm, fluxn, fluxm, flux_fullact, smax_prescribed               )
 !#endif
    end if

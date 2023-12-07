@@ -5,9 +5,6 @@
 <list id="MAM">
   NH4, NH4NO3
 </list>
-<list id="XNOx">
- XNH4NO3
-</list>
 
 <list id="gas">
   N2O5
@@ -54,6 +51,7 @@
   TERPOOH
   TOLOOH
   XOOH
+  SOAG0, SOAG1, SOAG2, SOAG3, SOAG4 
 </list>
 <list id="SOA">
   SOGM,SOGI,SOGT,SOGB,SOGX  
