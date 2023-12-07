@@ -2184,7 +2184,8 @@ end function bfb_expm1
     logical(btype),                intent(in) :: force_abort         !.TRUE. = forces abort if value violation is detected
 
     !Local variables:
-    real(rtype), parameter :: T_low  = 160._rtype !173._rtype
+    !real(rtype), parameter :: T_low  = 160._rtype !173._rtype
+    real(rtype), parameter :: T_low  = 100._rtype ! Changed to 100K for higher model top setting
     real(rtype), parameter :: T_high = 355._rtype !323._rtype
     real(rtype), parameter :: Q_high = 40.e-3_rtype
     real(rtype), parameter :: N_high = 1.e+20_rtype
