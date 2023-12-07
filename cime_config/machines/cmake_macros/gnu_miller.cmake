@@ -2,10 +2,6 @@ string(APPEND CONFIG_ARGS " --host=cray")
 if (COMP_NAME STREQUAL gptl)
   string(APPEND CPPDEFS " -DHAVE_NANOTIME -DBIT64 -DHAVE_SLASHPROC -DHAVE_GETTIMEOFDAY")
 endif()
-<<<<<<< HEAD
-string(APPEND CMAKE_C_FLAGS_RELEASE " -O2 -g")
-string(APPEND CMAKE_Fortran_FLAGS_RELEASE " -O2 -g")
-=======
 string(APPEND SLIBS " -L$ENV{CRAY_HDF5_PARALLEL_PREFIX}/lib -lhdf5_hl -lhdf5 -L$ENV{CRAY_NETCDF_HDF5PARALLEL_PREFIX} -L$ENV{CRAY_PARALLEL_NETCDF_PREFIX}/lib -lpnetcdf -lnetcdf -lnetcdff")
 set(CXX_LINKER "FORTRAN")
 set(NETCDF_PATH "$ENV{NETCDF_DIR}")
@@ -22,7 +18,6 @@ if (NOT DEBUG)
   #string(APPEND FFLAGS " -O0 -g -fbacktrace -fcheck=all -Wall")
 endif()
 string(APPEND CXX_LIBS " -lstdc++")
->>>>>>> First commit on SAI/eam/chem/tsmlt
 set(MPICC "cc")
 set(MPICXX "CC")
 set(MPIFC "ftn")
