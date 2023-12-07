@@ -75,9 +75,6 @@ contains
        endif
     enddo
 
-! HGKANG ---
-!   alknit_ndx = get_het_ndx( 'ALKNIT' )
-
     xisopno3_ndx = get_het_ndx( 'XISOPNO3' )
     xho2no2_ndx  = get_het_ndx( 'XHO2NO2' )
     xonitr_ndx   = get_het_ndx( 'XONITR' )
@@ -698,9 +695,6 @@ contains
           if( c2h5oh_ndx > 0 ) then
              het_rates(i,k,c2h5oh_ndx) = work3(i)
           end if
-!         if( alknit_ndx  > 0 ) then
-!            het_rates(i,k,alknit_ndx) = work3(i)
-!         end if
           if( alkooh_ndx  > 0 ) then
              het_rates(i,k,alkooh_ndx) = work3(i)
           end if

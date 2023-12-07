@@ -59,9 +59,9 @@ private
 save
 
 public :: microp_aero_init, microp_aero_run, microp_aero_readnl, microp_aero_register
-public :: microp_aero_final
-public :: aerosol_state_object
-public :: aerosol_properties_object
+!public :: microp_aero_final
+!public :: aerosol_state_object
+!public :: aerosol_properties_object
 
 ! Private module data
 
@@ -138,8 +138,8 @@ type aero_state_t
    class(aerosol_state), pointer :: obj=>null()
 end type aero_state_t
 
-class(aerosol_properties), pointer :: aero_props_obj=>null()
-type(aero_state_t), pointer :: aero_state(:) => null()
+!class(aerosol_properties), pointer :: aero_props_obj=>null()
+!type(aero_state_t), pointer :: aero_state(:) => null()
 
 
 contains
@@ -232,8 +232,9 @@ subroutine microp_aero_init
       cldo_idx     = pbuf_get_index('CLDO')
       dgnumwet_idx = pbuf_get_index('DGNUMWET')
 
-      aero_props_obj => modal_aerosol_properties()
-      call ndrop_init(aero_props_obj)
+      !aero_props_obj => modal_aerosol_properties()
+      !call ndrop_init(aero_props_obj)
+      call ndrop_init()
 
       ! Init indices for specific modes/species
 
@@ -356,46 +357,46 @@ end subroutine microp_aero_init
 
 !=========================================================================================
 ! returns a pointer to an aerosol state object for a given chunk index
-function aerosol_state_object(lchnk) result(obj)
-
-  integer,intent(in) :: lchnk ! local chunk index
-  class(aerosol_state), pointer :: obj ! aerosol state object pointer for local chunk
-
-  obj => aero_state(lchnk)%obj
-
-end function aerosol_state_object
+!function aerosol_state_object(lchnk) result(obj)
+!
+!  integer,intent(in) :: lchnk ! local chunk index
+!  class(aerosol_state), pointer :: obj ! aerosol state object pointer for local chunk
+!
+!  obj => aero_state(lchnk)%obj
+!
+!end function aerosol_state_object
 
 !=========================================================================================
 ! returns a pointer to an aerosol properties object
-function aerosol_properties_object() result(obj)
-
-  class(aerosol_properties), pointer :: obj ! aerosol properties object pointer
-
-  obj => aero_props_obj
-
-end function aerosol_properties_object
+!function aerosol_properties_object() result(obj)
+!
+!  class(aerosol_properties), pointer :: obj ! aerosol properties object pointer
+!
+!  obj => aero_props_obj
+!
+!end function aerosol_properties_object
 !=========================================================================================
 
-subroutine microp_aero_final
-
-  use ppgrid,           only: begchunk, endchunk
-
-  integer :: c
-
-  if (associated(aero_props_obj)) then
-     deallocate(aero_props_obj)
-  end if
-  nullify(aero_props_obj)
-
-  if (associated(aero_state)) then
-     do c = begchunk,endchunk
-        deallocate(aero_state(c)%obj)
-     end do
-     deallocate(aero_state)
-     nullify(aero_state)
-  end if
-
-end subroutine microp_aero_final
+!subroutine microp_aero_final
+!
+!  use ppgrid,           only: begchunk, endchunk
+!
+!  integer :: c
+!
+!  if (associated(aero_props_obj)) then
+!     deallocate(aero_props_obj)
+!  end if
+!  nullify(aero_props_obj)
+!
+!  if (associated(aero_state)) then
+!     do c = begchunk,endchunk
+!        deallocate(aero_state(c)%obj)
+!     end do
+!     deallocate(aero_state)
+!     nullify(aero_state)
+!  end if
+!
+!end subroutine microp_aero_final
 
 !=========================================================================================
 
@@ -819,19 +820,19 @@ subroutine microp_aero_run ( &
       call outfld('LCLOUD', lcldn, pcols, lchnk)
 
       call t_startf('dropmixnuc')
-!     call dropmixnuc( &
-!        state, ptend, deltatin, pbuf, wsub, &
-!        lcldn, lcldo, nctend_mixnuc, factnum)
-      if (use_preexisting_ice) then
-         call dropmixnuc( aero_props_obj, aero_state1_obj, &
-              state, ptend_loc, deltatin, pbuf, wsub, &
-              cldn, cldo, cldliqf, nctend_mixnuc, factnum)
-      else
-         cldliqf = 1._r8
-         call dropmixnuc( aero_props_obj, aero_state1_obj, &
-              state, ptend_loc, deltatin, pbuf, wsub, &
-              lcldn, lcldo, cldliqf, nctend_mixnuc, factnum)
-      end if
+      call dropmixnuc( &
+         state, ptend, deltatin, pbuf, wsub, &
+         lcldn, lcldo, nctend_mixnuc, factnum)
+!     if (use_preexisting_ice) then
+!        call dropmixnuc( aero_props_obj, aero_state1_obj, &
+!             state, ptend_loc, deltatin, pbuf, wsub, &
+!             cldn, cldo, cldliqf, nctend_mixnuc, factnum)
+!     else
+!        cldliqf = 1._r8
+!        call dropmixnuc( aero_props_obj, aero_state1_obj, &
+!             state, ptend_loc, deltatin, pbuf, wsub, &
+!             lcldn, lcldo, cldliqf, nctend_mixnuc, factnum)
+!     end if
       call t_stopf('dropmixnuc')
 
       npccn(:ncol,:) = nctend_mixnuc(:ncol,:)
