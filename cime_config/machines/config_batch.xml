@@ -314,6 +314,7 @@
       <arg flag="-q" name="$JOB_QUEUE"/>
       <arg flag="--account" name="$PROJECT"/>
       <arg flag="--cluster-constraint='green'"/>
+      <arg flag="--propagate=STACK"/>
     </submit_args>
     <directives>
       <directive> --job-name={{ job_id }}</directive>

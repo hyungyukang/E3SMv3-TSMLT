@@ -4,6 +4,11 @@ if (compile_threaded)
   string(APPEND CMAKE_CXX_FLAGS " -fopenmp")
   string(APPEND CMAKE_EXE_LINKER_FLAGS  " -fopenmp")
 endif()
+
+
+string(APPEND CMAKE_Fortran_FLAGS   " -O1")
+string(APPEND CMAKE_C_FLAGS   " -O1")
+
 string(APPEND CMAKE_C_FLAGS_DEBUG   " -O0 -g")
 string(APPEND CMAKE_Fortran_FLAGS_DEBUG   " -O0 -g")
 string(APPEND CMAKE_CXX_FLAGS_DEBUG " -O0 -g")
@@ -32,3 +37,4 @@ if (COMP_NAME STREQUAL gptl)
     string(APPEND CPPDEFS " -DHAVE_NANOTIME -DBIT64 -DHAVE_SLASHPROC -DHAVE_COMM_F2C -DHAVE_TIMES -DHAVE_GETTIMEOFDAY")
 endif()
 
+set(E3SM_LINK_WITH_FORTRAN "TRUE")

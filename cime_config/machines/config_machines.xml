@@ -59,7 +59,7 @@
   <machine MACH="miller">
     <DESC> ORNL AF cluster 800-node AMD Epyc 2-sockets 64-cores per node</DESC>
     <OS>CNL</OS>
-    <COMPILERS>gnu,cray,intel</COMPILERS>
+    <COMPILERS>gnu,crayclang,intel</COMPILERS>
     <MPILIBS>mpt</MPILIBS>
     <PROJECT>nwp501</PROJECT>
     <SAVE_TIMING_DIR>/lustre/cyclone/nwp501/proj-shared/e3sm</SAVE_TIMING_DIR>
@@ -99,6 +99,7 @@
       <modules>
         <command name="unload">craype</command>
         <command name="unload">cray-mpich</command>
+        <command name="unload">cray-mpich-ucx</command>
         <command name="unload">cray-parallel-netcdf</command>
         <command name="unload">cray-hdf5-parallel</command>
         <command name="unload">cray-hdf5</command>
@@ -106,34 +107,33 @@
         <command name="unload">cray-netcdf-hdf5parallel</command>
         <command name="unload">PrgEnv-cray</command>
         <command name="unload">PrgEnv-gnu</command>
-        <command name="purge"> </command>
-        <command name="load">craype</command>
-        <command name="load">cray-ucx</command>
-        <command name="load">libfabric/1.11.0.4.128</command>
-        <command name="load">cray-pmi/6.1.2</command>
-        <command name="load">perftools-base/22.05.0</command>
-        <command name="load">xpmem</command>
-        <command name="load">TimeZoneUTC</command>
-        <command name="load">DefApps</command>
-        <command name="load">slurm</command>
+        <command name="unload">darshan</command>
+        <command name="unload">perftools-base</command>
+        <command name="unload">perftools</command>
+        <command name="unload">craype-network-ofi</command>
+        <command name="unload">craype-network-ucx</command>
+        <command name="unload">craype-ucx</command>
       </modules>
       <modules compiler="gnu">
         <command name="load">PrgEnv-gnu/8.3.3</command>
-        <command name="swap">gcc gcc/10.3.0</command>
         <command name="load">cray-libsci</command>
-        <command name="swap">craype-network-ofi craype-network-ucx</command>
+        <command name="switch">gcc gcc/10.3.0</command>
+        <command name="switch">cray-mpich cray-mpich-ucx</command>
+        <command name="load">cray-ucx/2.7.0-1</command>
+        <command name="switch">craype-network-ofi craype-network-ucx</command>
       </modules>
-      <modules compiler="cray">
-        <command name="load">gcc/9.3.0</command>
+      <modules compiler="crayclang">
         <command name="load">PrgEnv-cray/8.3.3</command>
         <command name="load">cray-libsci</command>
-        <command name="rm">darshan</command>
+        <command name="switch">cce cce/14.0.0</command>
       </modules>
       <modules>
+        <command name="load">craype</command>
+        <command name="load">libfabric</command>
+        <command name="load">slurm</command>
         <command name="load">cray-hdf5-parallel/1.12.2.3</command>
         <command name="load">cray-netcdf-hdf5parallel/4.9.0.3</command>
         <command name="load">cray-parallel-netcdf/1.12.3.3</command>
-        <command name="swap">cray-mpich cray-mpich-ucx</command>
       </modules>
     </module_system>
 
@@ -142,15 +142,24 @@
     <TEST_TPUT_TOLERANCE>0.1</TEST_TPUT_TOLERANCE>
     <MAX_GB_OLD_TEST_DATA>1000</MAX_GB_OLD_TEST_DATA>
     <environment_variables>
+      <env name="PERL5LIB">/usr/lib/perl5/5.26.2</env>
       <env name="CMAKE_ROOT">/lustre/storm/nwp501/proj-shared/shared/programs/cmake-3.18.2</env>
       <env name="CMAKE_PREFIX_PATH">/lustre/storm/nwp501/proj-shared/shared/programs/cmake-3.18.2</env>
       <env name="PATH">/lustre/storm/nwp501/proj-shared/shared/programs/cmake-3.18.2/bin:$ENV{PATH}</env>
-      <env name="PERL5LIB">/usr/lib/perl5/5.26.2</env>
+    </environment_variables>
+    <environment_variables compiler="gnu">
       <env name="NETCDF_C_PATH">/opt/cray/pe/netcdf-hdf5parallel/4.9.0.3/gnu/9.1/</env>
       <env name="NETCDF_FORTRAN_PATH">/opt/cray/pe/netcdf-hdf5parallel/4.9.0.3/gnu/9.1/</env>
       <env name="PNETCDF_PATH">/opt/cray/pe/parallel-netcdf/1.12.3.3/gnu/9.1/</env>
       <env name="HDF5_PATH">/opt/cray/pe/hdf5-parallel/1.12.2.3/gnu/9.1/</env>
       <env name="LD_LIBRARY_PATH">/opt/cray/pe/hdf5-parallel/1.12.2.3/gnu/9.1/lib:/opt/cray/pe/netcdf-hdf5parallel/4.9.0.3/gnu/9.1/lib:/opt/cray/pe/parallel-netcdf/1.12.3.3/GNU/9.1/lib:$ENV{LD_LIBRARY_PATH}</env>
+    </environment_variables>
+    <environment_variables compiler="crayclang">
+      <env name="PERL5LIB">/usr/lib/perl5/5.26.2</env>
+      <env name="NETCDF_C_PATH">/opt/cray/pe/netcdf-hdf5parallel/4.9.0.3/crayclang/14.0/</env>
+      <env name="NETCDF_FORTRAN_PATH">/opt/cray/pe/netcdf-hdf5parallel/4.9.0.3/crayclang/14.0/</env>
+      <env name="PNETCDF_PATH">/opt/cray/pe/parallel-netcdf/1.12.3.3/crayclang/14.0/</env>
+      <env name="HDF5_PATH">/opt/cray/pe/hdf5-parallel/1.12.2.3/crayclang/14.0/</env>
     </environment_variables>
     <environment_variables SMP_PRESENT="TRUE">
       <env name="OMP_STACKSIZE">128M</env>
@@ -158,7 +167,12 @@
     <environment_variables SMP_PRESENT="TRUE" compiler="gnu">
       <env name="OMP_PLACES">cores</env>
     </environment_variables>
+    <resource_limits>
+      <resource name="RLIMIT_STACK">-1</resource>
+    </resource_limits>
   </machine>
+
+ <!--env name="UCX_IB_RCACHE_MAX_REGIONS">262144</env>-->
 
   <machine MACH="pm-cpu">
     <DESC>Perlmutter CPU-only nodes at NERSC.  Phase2 only: Each node has 2 AMD EPYC 7713 64-Core (Milan) 512GB</DESC>
