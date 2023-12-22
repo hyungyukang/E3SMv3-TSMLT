@@ -282,8 +282,9 @@
 <VOLC_MMR rad="rrtmgp">atm/cam/physprops/rrtmg_Bi_sigma1.8_c100521.nc'</VOLC_MMR>
 
 <!-- Sea Salt aerosol emission scale factors -->
-<seasalt_emis_scale>                          1.35 </seasalt_emis_scale>
-<seasalt_emis_scale chem="trop_mam4">         1.35 </seasalt_emis_scale>
+<seasalt_emis_scale>                          1.35D0 </seasalt_emis_scale>
+<seasalt_emis_scale chem="tsmlt_mam4">        1.35D0 </seasalt_emis_scale>
+<seasalt_emis_scale chem="trop_mam4">         1.35D0 </seasalt_emis_scale>
 <seasalt_emis_scale chem="trop_mam4_resus">   1.35 </seasalt_emis_scale>
 <seasalt_emis_scale chem="trop_mam4_resus_soag">   1.35 </seasalt_emis_scale>
 <seasalt_emis_scale chem="trop_mam4_resus_mom">1.35 </seasalt_emis_scale>
@@ -559,6 +560,13 @@
 <!-- Waccm-x runtime option -->
 <waccmx_opt           >off</waccmx_opt>
 <waccmx_opt waccmx="1">neutral</waccmx_opt>
+
+
+
+<!-- For scaling lightning sources of NOx -->
+<lght_no_prd_factor                                              >1.00D0</lght_no_prd_factor>
+<lght_no_prd_factor                hgrid="ne30np4"               >1.80D0</lght_no_prd_factor>
+
 
 <!-- For MEGAN VOCs -->
 <megan_factors_file>atm/cam/chem/trop_mozart/emis/megan21_emis_factors_c20130304.nc</megan_factors_file>
@@ -1182,19 +1190,8 @@
 <molec_diff_bot_press> 50.D0 </molec_diff_bot_press>
 
 <!-- dust emission tuning factor -->
-<dust_emis_fact                                                         >2.76D0</dust_emis_fact>
-<dust_emis_fact          hgrid="ne30np4"   phys="cam5"                  >1.38D0</dust_emis_fact>
-<dust_emis_fact          hgrid="ne45np4"   phys="cam5"                  >1.38D0</dust_emis_fact>
-<dust_emis_fact          hgrid="ne120np4"  phys="cam5"                  >1.2D0</dust_emis_fact>
-
-<dust_emis_fact                                         chem="trop_bam"	>4.2D0 </dust_emis_fact>
-<dust_emis_fact                            phys="cam5"                  >0.35D0</dust_emis_fact>
-<dust_emis_fact          hgrid="0.47x0.63" phys="cam5"                  >0.45D0</dust_emis_fact>
-<dust_emis_fact          hgrid="0.23x0.31" phys="cam5"                  >0.45D0</dust_emis_fact>
-
-<dust_emis_fact dyn="se"                   phys="cam5"                  >0.55D0</dust_emis_fact>
-<dust_emis_fact dyn="fv"                   phys="cam5" clubb_sgs="1"    >0.13D0</dust_emis_fact>
-
+<dust_emis_fact                                                         >0.80D0</dust_emis_fact>
+<dust_emis_fact dyn="se"                   phys="default"               >0.80D0</dust_emis_fact>
 
 <!-- Sea Salt tuning option for scavenging mods by PNNL -->
 <ssalt_tuning>.false.</ssalt_tuning>
@@ -2082,9 +2079,9 @@ with se_tstep, dt_remap_factor, dt_tracer_factor set to -1
 <use_gw_energy_fix phys="default"> .true.      </use_gw_energy_fix>
 <clubb_C14 phys="default"> 2.5D0      </clubb_C14>
 <clubb_tk1 phys="default"> 268.15D0   </clubb_tk1>
-<dust_emis_fact phys="default"> 12.8D0     </dust_emis_fact>
+<!--<dust_emis_fact phys="default"> 12.8D0     </dust_emis_fact>-->
 <linoz_psc_T               > 198.0D0    </linoz_psc_T>
-<lght_no_prd_factor        > 5.0D0    </lght_no_prd_factor>
+<!--<lght_no_prd_factor        > 5.0D0    </lght_no_prd_factor>-->
 <micro_mincdnc phys="default" microphys="mg2"> 10.D6      </micro_mincdnc>
 <nucleate_ice_subgrid phys="default" clubb_sgs="1" microphys="p3" >1.35D0</nucleate_ice_subgrid>
 <sscav_tuning phys="default" microphys="p3">.false.</sscav_tuning>
