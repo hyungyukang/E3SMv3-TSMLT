@@ -5,7 +5,7 @@ module mo_chm_diags
   use mo_tracname,  only : solsym
   use chem_mods,    only : rxntot, nfs, gas_pcnst, indexm, adv_mass
   use ppgrid,       only : pver
-  use mo_constants, only : rgrav, rearth
+  use mo_constants, only : rgrav, rearth, avogadro
   use mo_chem_utls, only : get_rxt_ndx, get_spc_ndx
   use cam_history,  only : fieldname_len
   use mo_jeuv,      only : neuv
@@ -54,6 +54,9 @@ module mo_chm_diags
 
   real(r8), parameter :: N_molwgt = 14.00674_r8
   real(r8), parameter :: S_molwgt = 32.066_r8
+
+  ! constants for converting O3 mixing ratio to DU
+  real(r8), parameter :: DUfac = 2.687e20_r8   ! 1 DU in molecules per m^2
 
 contains
 
@@ -503,7 +506,7 @@ contains
        call add_default('wet_deposition_NHx_as_N', 1, ' ')
     endif
 
-!   call addfld( 'TOZ', horiz_only,    'A', 'DU', 'Total column ozone' )
+    call addfld( 'TOZ', horiz_only,    'A', 'DU', 'Total column ozone' )
 !   call addfld( 'TCO', horiz_only,    'A', 'DU', 'Tropospheric column ozone based on chemistry tropopause' )
 !   call add_default( 'TCO', 1, ' ' )
 !   call addfld( 'SCO', horiz_only,    'A', 'DU', 'Stratospheric column ozone based on chemistry tropopause' )
@@ -522,6 +525,7 @@ contains
     use cam_history,  only : outfld
     use phys_grid,    only : get_area_all_p
     use species_sums_diags, only : species_sums_output
+    use physconst,    only : mwdry                   ! molecular weight of dry air
 !
 ! CCMI
 !
@@ -554,7 +558,7 @@ contains
     real(r8)    :: wrk(ncol,pver)
     !      real(r8)    :: tmp(ncol,pver)
     !      real(r8)    :: m(ncol,pver)
-    real(r8)    :: un2(ncol)
+    real(r8)    :: un2(ncol), wrk1d(ncol)
     
     real(r8), dimension(ncol,pver) :: vmr_nox, vmr_noy, vmr_clox, vmr_cloy, vmr_tcly, vmr_brox, vmr_broy, vmr_toth
     real(r8), dimension(ncol,pver) :: vmr_tbry, vmr_foy, vmr_tfy
@@ -760,11 +764,15 @@ contains
 !
 ! TOZ, SCO, TCO
 !
-!   if ( id_o3 > 0 ) then
-!      wrk(:ncol,:) = 
-!   endif
-
-
+    if ( id_o3 > 0 ) then
+       wrk(:ncol,:) = pdeldry(:ncol,:)*vmr(:ncol,:,id_o3)*avogadro*rgrav/mwdry/DUfac*1.e3_r8
+    endif
+    ! total column ozone
+    wrk1d(:) = 0._r8
+    do k = 1,pver ! loop from top of atmosphere to surface
+       wrk1d(:) = wrk1d(:) + wrk(:ncol,k)
+    end do
+    call outfld( 'TOZ', wrk1d,   ncol, lchnk )
 
     call outfld( 'NOX',  vmr_nox  (:ncol,:), ncol, lchnk )
     call outfld( 'NOY',  vmr_noy  (:ncol,:), ncol, lchnk )
