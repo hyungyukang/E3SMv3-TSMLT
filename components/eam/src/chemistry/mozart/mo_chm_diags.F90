@@ -503,11 +503,17 @@ contains
        call add_default('wet_deposition_NHx_as_N', 1, ' ')
     endif
 
+!   call addfld( 'TOZ', horiz_only,    'A', 'DU', 'Total column ozone' )
+!   call addfld( 'TCO', horiz_only,    'A', 'DU', 'Tropospheric column ozone based on chemistry tropopause' )
+!   call add_default( 'TCO', 1, ' ' )
+!   call addfld( 'SCO', horiz_only,    'A', 'DU', 'Stratospheric column ozone based on chemistry tropopause' )
+!   call add_default( 'SCO', 1, ' ' )
+
     call species_sums_init()
 
   end subroutine chm_diags_inti
 
-  subroutine chm_diags( lchnk, ncol, vmr, mmr, rxt_rates, invariants, depvel, depflx, mmr_tend, pdel, pmid, ltrop, &
+  subroutine chm_diags( lchnk, ncol, vmr, mmr, rxt_rates, invariants, depvel, depflx, mmr_tend, pdel, pdeldry, pmid, ltrop, &
                         wetdepflx, nhx_nitrogen_flx, noy_nitrogen_flx )
     !--------------------------------------------------------------------
     !	... utility routine to output chemistry diagnostic variables
@@ -534,6 +540,7 @@ contains
     real(r8), intent(in)  :: depflx(ncol, gas_pcnst)
     real(r8), intent(in)  :: mmr_tend(ncol,pver,gas_pcnst)
     real(r8), intent(in)  :: pdel(ncol,pver)
+    real(r8), intent(in)  :: pdeldry(ncol,pver)
     real(r8), intent(in)  :: pmid(ncol,pver)
     integer,  intent(in)  :: ltrop(ncol)
     real(r8), intent(in)  :: wetdepflx(ncol, gas_pcnst)
@@ -556,7 +563,7 @@ contains
     real(r8), dimension(ncol)      :: wd_noy, wd_nhx
     real(r8), dimension(ncol,pver) :: vmr_hox
 
-    real(r8) :: area(ncol), mass(ncol,pver)
+    real(r8) :: area(ncol), mass(ncol,pver), drymass(ncol,pver)
     real(r8) :: wgt
 
     !--------------------------------------------------------------------
@@ -589,6 +596,7 @@ contains
 
     do k = 1,pver
        mass(:ncol,k) = pdel(:ncol,k) * area(:ncol) * rgrav
+       drymass(:ncol,k) = pdeldry(:ncol,k) * area(:ncol) * rgrav
     enddo
 
     call outfld( 'AREA', area(:ncol),   ncol, lchnk )
@@ -748,6 +756,14 @@ contains
        end if
 !
     enddo
+
+!
+! TOZ, SCO, TCO
+!
+!   if ( id_o3 > 0 ) then
+!      wrk(:ncol,:) = 
+!   endif
+
 
 
     call outfld( 'NOX',  vmr_nox  (:ncol,:), ncol, lchnk )
