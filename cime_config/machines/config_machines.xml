@@ -143,9 +143,9 @@
     <MAX_GB_OLD_TEST_DATA>1000</MAX_GB_OLD_TEST_DATA>
     <environment_variables>
       <env name="PERL5LIB">/usr/lib/perl5/5.26.2</env>
-      <env name="CMAKE_ROOT">/lustre/storm/nwp501/proj-shared/shared/programs/cmake-3.18.2</env>
-      <env name="CMAKE_PREFIX_PATH">/lustre/storm/nwp501/proj-shared/shared/programs/cmake-3.18.2</env>
-      <env name="PATH">/lustre/storm/nwp501/proj-shared/shared/programs/cmake-3.18.2/bin:$ENV{PATH}</env>
+      <env name="CMAKE_ROOT">/lustre/cyclone/nwp501/proj-shared/hgkang/programs/cmake-3.18.2</env>
+      <env name="CMAKE_PREFIX_PATH">/lustre/cyclone/nwp501/proj-shared/hgkang/programs/cmake-3.18.2</env>
+      <env name="PATH">/lustre/cyclone/nwp501/proj-shared/hgkang/programs/cmake-3.18.2/bin:$ENV{PATH}</env>
     </environment_variables>
     <environment_variables compiler="gnu">
       <env name="NETCDF_C_PATH">/opt/cray/pe/netcdf-hdf5parallel/4.9.0.3/gnu/9.1/</env>

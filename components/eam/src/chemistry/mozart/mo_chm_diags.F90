@@ -108,6 +108,7 @@ contains
     logical :: history_chemspecies_srf ! output the chemistry constituents species in the surface layer
     logical :: history_dust
     integer :: bulkaero_species(20)
+    integer :: e90_ndx
 
     !-----------------------------------------------------------------------
 
@@ -485,6 +486,10 @@ contains
 
     enddo
 
+    ! tropospheric air mass diagnostics based on 3D tropopause flag
+    e90_ndx=-1
+    e90_ndx = get_spc_ndx('E90')
+
     call addfld( 'MASS', (/ 'lev' /), 'A', 'kg', 'mass of grid box' )
     call addfld( 'AREA', horiz_only,  'A', 'm2', 'area of grid box' )
 
@@ -507,17 +512,17 @@ contains
     endif
 
     call addfld( 'TOZ', horiz_only,    'A', 'DU', 'Total column ozone' )
-!   call addfld( 'TCO', horiz_only,    'A', 'DU', 'Tropospheric column ozone based on chemistry tropopause' )
-!   call add_default( 'TCO', 1, ' ' )
-!   call addfld( 'SCO', horiz_only,    'A', 'DU', 'Stratospheric column ozone based on chemistry tropopause' )
-!   call add_default( 'SCO', 1, ' ' )
+    call addfld( 'TCO', horiz_only,    'A', 'DU', 'Tropospheric column ozone based on chemistry tropopause' )
+    call add_default( 'TCO', 1, ' ' )
+    call addfld( 'SCO', horiz_only,    'A', 'DU', 'Stratospheric column ozone based on chemistry tropopause' )
+    call add_default( 'SCO', 1, ' ' )
 
     call species_sums_init()
 
   end subroutine chm_diags_inti
 
   subroutine chm_diags( lchnk, ncol, vmr, mmr, rxt_rates, invariants, depvel, depflx, mmr_tend, pdel, pdeldry, pmid, ltrop, &
-                        wetdepflx, nhx_nitrogen_flx, noy_nitrogen_flx )
+                        wetdepflx, nhx_nitrogen_flx, noy_nitrogen_flx, tropFlag)
     !--------------------------------------------------------------------
     !	... utility routine to output chemistry diagnostic variables
     !--------------------------------------------------------------------
@@ -550,11 +555,13 @@ contains
     real(r8), intent(in)  :: wetdepflx(ncol, gas_pcnst)
     real(r8), intent(out) :: nhx_nitrogen_flx(ncol) ! kgN/m2/sec
     real(r8), intent(out) :: noy_nitrogen_flx(ncol) ! kgN/m2/sec
+    logical, optional, intent(in) :: tropFlag(ncol,pver)! 3D tropospheric level flag
 
     !--------------------------------------------------------------------
     !	... local variables
     !--------------------------------------------------------------------
     integer     :: i, k, m
+    integer :: e90_ndx
     real(r8)    :: wrk(ncol,pver)
     !      real(r8)    :: tmp(ncol,pver)
     !      real(r8)    :: m(ncol,pver)
@@ -766,13 +773,76 @@ contains
 !
     if ( id_o3 > 0 ) then
        wrk(:ncol,:) = pdeldry(:ncol,:)*vmr(:ncol,:,id_o3)*avogadro*rgrav/mwdry/DUfac*1.e3_r8
-    endif
-    ! total column ozone
-    wrk1d(:) = 0._r8
-    do k = 1,pver ! loop from top of atmosphere to surface
-       wrk1d(:) = wrk1d(:) + wrk(:ncol,k)
-    end do
-    call outfld( 'TOZ', wrk1d,   ncol, lchnk )
+
+       ! total column ozone
+       wrk1d(:) = 0._r8
+       do k = 1,pver ! loop from top of atmosphere to surface
+          wrk1d(:) = wrk1d(:) + wrk(:ncol,k)
+       end do
+       call outfld( 'TOZ', wrk1d(:ncol),   ncol, lchnk )
+
+       ! stratospheric column ozone
+       wrk1d(:) = 0._r8
+!      if (e90_ndx < 0 .or. .not. present(tropFlag)) then
+!        ! use 2D tropopause if E90 not used or tropFlag not present.
+!        ! e90_ndx < 0 condition alone is sufficient, as 3D tropFlag is computed
+!        ! only when E90 is used.
+!        ! This change is to make the calculation valid when E90 is not in use
+!
+!         do i = 1,ncol
+!            do k = 1,pver
+!               if (k > ltrop(i)) then
+!                 exit
+!               end if
+!               wrk1d(i) = wrk1d(i) + wrk(i,k)
+!            end do
+!         end do
+!      else
+!         do i = 1,ncol
+!            do k = 1,pver
+!               if (.not. tropFlag(i,k)) then
+!                  wrk1d(i) = wrk1d(i) + wrk(i,k)
+!               end if
+!            end do
+!         end do
+!      end if
+
+          do i = 1,ncol
+             do k = 1,ltrop(i)-1
+                wrk1d(i) = wrk1d(i) + wrk(i,k)
+             end do
+          end do
+       call outfld( 'SCO', wrk1d,   ncol, lchnk )
+ 
+       ! tropospheric column ozone
+       wrk1d(:) = 0._r8
+!      if (e90_ndx < 0 .or. .not. present(tropFlag)) then
+!         do i = 1,ncol
+!            do k = 1,pver
+!               if (k <= ltrop(i)) then
+!                 cycle
+!               end if
+!               wrk1d(i) = wrk1d(i) + wrk(i,k)
+!            end do
+!         end do
+!      else
+!         do i = 1,ncol
+!            do k = 1,pver
+!               if (tropFlag(i,k)) then
+!                  wrk1d(i) = wrk1d(i) + wrk(i,k)
+!               end if
+!            end do
+!         end do
+!      end if
+          do i = 1,ncol
+             do k = ltrop(i),pver
+                wrk1d(i) = wrk1d(i) + wrk(i,k)
+             end do
+          end do
+       call outfld( 'TCO', wrk1d,   ncol, lchnk )
+
+    endif ! id_o3
+
 
     call outfld( 'NOX',  vmr_nox  (:ncol,:), ncol, lchnk )
     call outfld( 'NOY',  vmr_noy  (:ncol,:), ncol, lchnk )

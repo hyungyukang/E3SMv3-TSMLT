@@ -169,6 +169,7 @@ end function chem_is
     use aero_model,          only : aero_model_register
     use physics_buffer,      only : pbuf_add_field, dtype_r8
     use upper_bc,            only : ubc_fixed_conc
+!   use prescribed_strataero,only : prescribed_strataero_register
 
     implicit none
 
@@ -321,6 +322,9 @@ end function chem_is
     ! add fields to pbuf needed by aerosol models
     call aero_model_register()
 
+    ! add fields to pbuf needed by prescribed strataero files
+!   call prescribed_strataero_register()
+
   end subroutine chem_register
 
 !================================================================================================
@@ -343,6 +347,7 @@ end function chem_is
     use mo_sulf,          only: sulf_readnl
     use species_sums_diags,only: species_sums_readnl
     use ocean_emis,       only: ocean_emis_readnl
+!   use prescribed_strataero, only: prescribed_strataero_readnl
 
     ! args
 
@@ -571,6 +576,7 @@ end function chem_is
    call sulf_readnl(nlfile)
    call species_sums_readnl(nlfile)
    call ocean_emis_readnl(nlfile)
+!  call prescribed_strataero_readnl(nlfile)
 
  end subroutine chem_readnl
 
@@ -662,6 +668,7 @@ end function chem_is_active
     use fire_emissions,      only : fire_emissions_init
     use short_lived_species, only : short_lived_species_initic
     use ocean_emis,          only : ocean_emis_init
+!   use prescribed_strataero,only : prescribed_strataero_init
 
     type(physics_buffer_desc), pointer :: pbuf2d(:,:)
     type(physics_state), intent(in):: phys_state(begchunk:endchunk)
@@ -852,6 +859,9 @@ end function chem_is_active
      if (is_first_step() .and. srf_ozone_pbf_ndx>0) then
         call pbuf_set_field(pbuf2d, srf_ozone_pbf_ndx, 0._r8)
      end if
+ 
+     ! initialize prescribed strataero
+!    call prescribed_strataero_init()
 
     if (masterproc) then
       write(*,*)'end of chem_init ----------------'
@@ -1072,6 +1082,7 @@ end function chem_is_active
     use physics_buffer,    only : physics_buffer_desc
     use ocean_emis,        only : ocean_emis_advance
     use mee_fluxes,        only : mee_fluxes_adv
+!   use prescribed_strataero, only : prescribed_strataero_adv
 
     implicit none
 
@@ -1164,6 +1175,11 @@ end function chem_is_active
 
     call ocean_emis_advance( pbuf2d, phys_state )
 
+
+    ! prescribed strataero
+!   call prescribed_strataero_adv(phys_state, pbuf2d)
+
+
   end subroutine chem_timestep_init
 
   subroutine chem_timestep_tend( state, ptend, cam_in, cam_out, dt, pbuf,  fh2o)
@@ -1187,11 +1203,12 @@ end function chem_is_active
     use mo_gas_phase_chemdr, only : gas_phase_chemdr
     use camsrfexch,          only : cam_in_t, cam_out_t
     use perf_mod,            only : t_startf, t_stopf
-    use tropopause,          only : tropopause_findChemTrop, tropopause_find
+    use tropopause,          only : tropopause_findChemTrop, tropopause_find, tropopause_e90_3d
     use mo_drydep,           only : drydep_update
     use mo_neu_wetdep,       only : neu_wetdep_tend
     use aerodep_flx,         only : aerodep_flx_prescribed
     use short_lived_species, only : short_lived_species_writeic
+    use mo_chem_utls,        only : get_spc_ndx
 
     implicit none
 
@@ -1220,6 +1237,7 @@ end function chem_is_active
     real(r8) :: drydepflx(pcols,pcnst)             ! dry deposition fluxes (kg/m2/s)
     real(r8) :: wetdepflx(pcols,pcnst)             ! wet deposition fluxes (kg/m2/s)
     integer  :: tropLev(pcols), tropLevChem(pcols)
+    integer  :: tmp_tropLev(pcols)
     real(r8) :: ncldwtr(pcols,pver)                ! droplet number concentration (#/kg)
     real(r8), pointer :: fsds(:)     ! longwave down at sfc
     real(r8), pointer :: pblh(:)
@@ -1230,8 +1248,11 @@ end function chem_is_active
     real(r8), pointer :: cldtop(:)
     real(r8) :: nhx_nitrogen_flx(pcols)
     real(r8) :: noy_nitrogen_flx(pcols)
+    logical  :: tropFlag(pcols,pver)      ! 3D tropospheric level flag
+    real(r8) :: tropFlagInt(pcols,pver)   ! 3D tropospheric level flag integer, troposphere 1, others 0
 
     integer :: tim_ndx
+    integer :: e90_ndx
 
     logical :: lq(pcnst)
 
@@ -1276,13 +1297,25 @@ end function chem_is_active
 !-----------------------------------------------------------------------
 ! get tropopause level
 !-----------------------------------------------------------------------
+
+! initialize tropospheric level flags
+    tropFlag = .false.
+    tropFlagInt = 0._r8
+
+    e90_ndx = get_spc_ndx('E90')
+
+    call tropopause_find(state,tropLev)
     if (.not.chem_use_chemtrop) then
-       call tropopause_find(state,tropLev)
        tropLevChem=tropLev
     else
-       call tropopause_find(state,tropLev)
        call tropopause_findChemTrop(state, tropLevChem)
+       call tropopause_e90_3d(state, tmp_tropLev, tropLev, tropFlag, tropFlagInt)
+
+       !call tropopause_findChemTrop(state, tropLevChem)
+       !call tropopause_e90_3d(state, tmp_tropLev, tropLevChem, tropFlag, tropFlagInt)
     endif
+
+
 
     tim_ndx = pbuf_old_tim_idx()
     call pbuf_get_field(pbuf, ndx_fsds,       fsds)
@@ -1322,7 +1355,7 @@ end function chem_is_active
                           fsds, cam_in%ts, cam_in%asdir, cam_in%ocnfrac, cam_in%icefrac, &
                           cam_out%precc, cam_out%precl, cam_in%snowhland, ghg_chem, state%latmapback, &
                           drydepflx, wetdepflx, cam_in%cflx, cam_in%fireflx, cam_in%fireztop, &
-                          nhx_nitrogen_flx, noy_nitrogen_flx, ptend%q, pbuf )
+                          nhx_nitrogen_flx, noy_nitrogen_flx, ptend%q, pbuf, tropFlag=tropFlag, tropFlagInt=tropFlagInt)
 !   do k = 1,pver
 !   do i = 1,ncol
 !      print*, 'HGCHEM 4',ptend%q(i,k,138),ptend%q(i,k,1), ptend%q(i,k,137),ptend%q(i,k,139)
@@ -1410,6 +1443,7 @@ end function chem_is_active
     use pio, only : file_desc_t
     use tracer_cnst,      only: init_tracer_cnst_restart
     use tracer_srcs,      only: init_tracer_srcs_restart
+!   use prescribed_strataero, only: init_prescribed_strataero_restart
     implicit none
     type(file_desc_t),intent(inout) :: File     ! pio File pointer
 
@@ -1418,12 +1452,14 @@ end function chem_is_active
     !
     call init_tracer_cnst_restart(File)
     call init_tracer_srcs_restart(File)
+!   call init_prescribed_strataero_restart(File)
   end subroutine chem_init_restart
 !-------------------------------------------------------------------
 !-------------------------------------------------------------------
   subroutine chem_write_restart( File )
     use tracer_cnst, only: write_tracer_cnst_restart
     use tracer_srcs, only: write_tracer_srcs_restart
+!   use prescribed_strataero, only: write_prescribed_strataero_restart
     use pio, only : file_desc_t
     implicit none
     type(file_desc_t) :: File
@@ -1433,6 +1469,7 @@ end function chem_is_active
     !
     call write_tracer_cnst_restart(File)
     call write_tracer_srcs_restart(File)
+!   call write_prescribed_strataero_restart(File)
   end subroutine chem_write_restart
 
 !-------------------------------------------------------------------
@@ -1440,6 +1477,7 @@ end function chem_is_active
   subroutine chem_read_restart( File )
     use tracer_cnst, only: read_tracer_cnst_restart
     use tracer_srcs, only: read_tracer_srcs_restart
+!   use prescribed_strataero, only: read_prescribed_strataero_restart
 
     use pio, only : file_desc_t
     implicit none
@@ -1450,6 +1488,7 @@ end function chem_is_active
     !
     call read_tracer_cnst_restart(File)
     call read_tracer_srcs_restart(File)
+!   call read_prescribed_strataero_restart(File)
   end subroutine chem_read_restart
 
 end module chemistry

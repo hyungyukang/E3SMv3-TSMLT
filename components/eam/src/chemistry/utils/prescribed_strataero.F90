@@ -50,6 +50,14 @@ module prescribed_strataero
   character(len=16), parameter :: dens_name2 = 'VOLC_DENS2'
   character(len=16), parameter :: dens_name3 = 'VOLC_DENS3'
 
+! 1360 VOLC_DENS                        molecules/cm3      32 I  prescribed volcanic aerosol number density
+! 1361 VOLC_MMR                         kg/kg              32 I  prescribed volcanic aerosol dry mass mixing ratio
+! 1362 VOLC_RAD_GEOM                    m                  32 I  volcanic aerosol geometric-mean radius
+! 1363 VOLC_MASS                        kg/m^2             32 I  volcanic aerosol vertical mass path in layer
+! 1364 VOLC_MASS_C                      kg/m^2              1 I  volcanic aerosol column mass
+! 1365 VOLC_SAD                         cm2/cm3            32 I  stratospheric aerosol density
+! https://webext.cgd.ucar.edu/B1850/ocn-dev/b.e15.B1850.f09_g16.pi_control.all.63/run/atm.log.160710-114346
+
   ! These variables are settable via the namelist (with longer names)
   character(len=32)  :: specifier(7) = ' '
   character(len=256) :: filename = 'NONE'

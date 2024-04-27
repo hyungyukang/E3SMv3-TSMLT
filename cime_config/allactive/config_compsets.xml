@@ -80,8 +80,8 @@
 </compset>
 
 <compset>
-  <alias>WCYCL20TR</alias>
-  <lname>20TRSOI_EAM%CMIP6_ELM%SPBC_MPASSI_MPASO_MOSART_SGLC_SWAV</lname>
+  <alias>WCYCL20TR_TSMLT</alias>
+  <lname>20TRSOI_EAM%CMIP6-TSMLT_ELM%SPBC_MPASSI_MPASO_MOSART_SGLC_SWAV</lname>
 </compset>
 
 <!-- ************************************************ -->
@@ -123,6 +123,21 @@
 <compset>
   <alias>WCYCLSSP370</alias>
   <lname>SSP370SOI_EAM%CMIP6_ELM%SPBC_MPASSI_MPASO_MOSART_SGLC_SWAV</lname>
+</compset>
+
+<compset>
+  <alias>WCYCLSSP585_TSMLT</alias>
+  <lname>SSP585SOI_EAM%CMIP6-TSMLT_ELM%SPBC_MPASSI_MPASO_MOSART_SGLC_SWAV</lname>
+</compset>
+
+<compset>
+  <alias>WCYCLSSP534OS_TSMLT</alias>
+  <lname>SSP534OSSOI_EAM%CMIP6-TSMLT_ELM%SPBC_MPASSI_MPASO_MOSART_SGLC_SWAV</lname>
+</compset>
+
+<compset>
+  <alias>WCYCLSSP370_TSMLT</alias>
+  <lname>SSP370SOI_EAM%CMIP6-TSMLT_ELM%SPBC_MPASSI_MPASO_MOSART_SGLC_SWAV</lname>
 </compset>
 
 <!-- E3SM v1 science compsets -->
@@ -439,6 +454,7 @@
       <value  compset="20TR_EAM">1850-01-01</value>
       <value  compset="SSP585.*_EAM">2015-01-01</value>
       <value  compset="SSP370.*_EAM">2015-01-01</value>
+      <value  compset="SSP534OS.*_EAM">2015-01-01</value>
     </values>
   </entry>
 

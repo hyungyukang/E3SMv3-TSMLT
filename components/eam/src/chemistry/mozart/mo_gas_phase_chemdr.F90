@@ -238,7 +238,9 @@ contains
                               delt, ps, &
                               fsds, ts, asdir, ocnfrac, icefrac, &
                               precc, precl, snowhland, ghg_chem, latmapback, &
-                              drydepflx, wetdepflx, cflx, fire_sflx, fire_ztop, nhx_nitrogen_flx, noy_nitrogen_flx, qtend, pbuf)
+                              drydepflx, wetdepflx, cflx, fire_sflx, fire_ztop, &
+                              nhx_nitrogen_flx, noy_nitrogen_flx, qtend, pbuf, &
+                              tropFlag, tropFlagInt)
 
     !-----------------------------------------------------------------------
     !     ... Chem_solver advances the volumetric mixing ratio
@@ -335,6 +337,10 @@ contains
     real(r8),       intent(in)    :: wetdepflx(pcols,pcnst)         ! wet deposition flux (kg/m^2/s)
     real(r8), intent(out) :: nhx_nitrogen_flx(pcols)
     real(r8), intent(out) :: noy_nitrogen_flx(pcols)
+    logical, optional, intent(in) :: tropFlag(pcols,pver)      ! 3D tropospheric level flag
+                                                               ! true: tropospheric box
+    real(r8), optional, intent(in) :: tropFlagInt(pcols,pver)      ! 3D tropospheric level flag
+                                                                   ! 1: tropospheric box
 
     type(physics_buffer_desc), pointer :: pbuf(:)
 
@@ -1153,7 +1159,7 @@ contains
     call chm_diags( lchnk, ncol, vmr(:ncol,:,:), mmr_new(:ncol,:,:), &
                     reaction_rates(:ncol,:,:), invariants(:ncol,:,:), depvel(:ncol,:),  sflx(:ncol,:), &
                     mmr_tend(:ncol,:,:), pdel(:ncol,:), pdeldry(:ncol,:), pmid(:ncol,:), troplev(:ncol), wetdepflx_diag(:ncol,:), &
-                    nhx_nitrogen_flx(:ncol), noy_nitrogen_flx(:ncol) )
+                    nhx_nitrogen_flx(:ncol), noy_nitrogen_flx(:ncol), tropFlag=tropFlag)
 
     call rate_diags_calc( reaction_rates(:,:,:), vmr(:,:,:), invariants(:,:,indexm), ncol, lchnk )
 !

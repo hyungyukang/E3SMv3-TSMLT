@@ -2108,7 +2108,7 @@ my $megan_emis = defined $nl->get_value('megan_specifier');
 if ( $megan_emis ) { add_default($nl, 'megan_factors_file'); }
 
 # Tropospheric full chemistry options
-if ($chem =~ /trop_mozart/ or $chem =~ /trop_strat/ or $chem =~ /waccm_tsmlt/ ) {
+if ($chem =~ /trop_mozart/ or $chem =~ /trop_strat/ or $chem =~ /tsmlt/ ) {
 
     # Surface emission datasets:
     my %verhash;
