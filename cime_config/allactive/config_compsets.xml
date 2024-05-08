@@ -39,6 +39,11 @@
 
 <!-- E3SM CMIP6 COMPSETS science compsets -->
 <compset>
+  <alias>WCYCL1850_TSMLT_MAM5</alias>
+  <lname>1850SOI_EAM%CMIP6-TSMLT-MAM5_ELM%SPBC_MPASSI_MPASO_MOSART_SGLC_SWAV</lname>
+</compset>
+
+<compset>
   <alias>WCYCL1850_TSMLT</alias>
   <lname>1850SOI_EAM%CMIP6-TSMLT_ELM%SPBC_MPASSI_MPASO_MOSART_SGLC_SWAV</lname>
 </compset>
@@ -131,8 +136,19 @@
 </compset>
 
 <compset>
+  <alias>WCYCLSSP585_TSMLT_MAM5</alias>
+  <lname>SSP585SOI_EAM%CMIP6-TSMLT-MAM5_ELM%SPBC_MPASSI_MPASO_MOSART_SGLC_SWAV</lname>
+</compset>
+
+
+<compset>
   <alias>WCYCLSSP534OS_TSMLT</alias>
   <lname>SSP534OSSOI_EAM%CMIP6-TSMLT_ELM%SPBC_MPASSI_MPASO_MOSART_SGLC_SWAV</lname>
+</compset>
+
+<compset>
+  <alias>WCYCLSSP534OS_TSMLT_MAM5</alias>
+  <lname>SSP534OSSOI_EAM%CMIP6-TSMLT-MAM5_ELM%SPBC_MPASSI_MPASO_MOSART_SGLC_SWAV</lname>
 </compset>
 
 <compset>

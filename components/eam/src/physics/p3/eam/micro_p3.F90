@@ -3096,6 +3096,8 @@ subroutine prevent_ice_overdepletion(pres,t_atm,qv,latent_heat_vapor,latent_heat
    qtmp_all = qv - (qidep + qinuc + qinuc_cnt)*dt + (qi2qv_sublim_tend + qr2qv_evap_tend)*dt 
    ttmp_all = t_atm + ((qidep-qi2qv_sublim_tend+qinuc+qinuc_cnt)*latent_heat_sublim*inv_cp + (-qr2qv_evap_tend*latent_heat_vapor*inv_cp))*dt
 
+   !print*, t_atm, qidep, qi2qv_sublim_tend, qinuc, qinuc_cnt
+
    qv_sat_l = qv_sat(ttmp_all,pres,0)
 
    ! If water vapor mass exceeds ice saturation value, we limit only source terms (e.g., sublimation, rain evp) 
@@ -4599,6 +4601,7 @@ case (2)  ! deposition freezing / contact freezing
       qicnt = nicnt*mi0l
       ninuc_cnt = frzdep*1.0e6_rtype/rho
       qinuc_cnt = ninuc_cnt*mi0
+      !print*, qinuc_cnt,ninuc_cnt,mi0,frzdep,rho
    else
       nicnt = 0.0_rtype
       qicnt = 0.0_rtype

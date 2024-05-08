@@ -285,6 +285,7 @@
 <!-- Sea Salt aerosol emission scale factors -->
 <seasalt_emis_scale>                          1.35D0 </seasalt_emis_scale>
 <seasalt_emis_scale chem="tsmlt_mam4">        1.35D0 </seasalt_emis_scale>
+<seasalt_emis_scale chem="tsmlt_mam5">        1.35D0 </seasalt_emis_scale>
 <seasalt_emis_scale chem="trop_mam4">         1.35D0 </seasalt_emis_scale>
 <seasalt_emis_scale chem="trop_mam4_resus">   1.35 </seasalt_emis_scale>
 <seasalt_emis_scale chem="trop_mam4_resus_soag">   1.35 </seasalt_emis_scale>
@@ -316,6 +317,14 @@
 <mam5_mode3_file rad="rrtmg">atm/cam/physprops/mam4_mode3_rrtmg_aeronetdust_c141106.nc</mam5_mode3_file>
 <mam5_mode4_file rad="rrtmg">atm/cam/physprops/mam4_mode4_rrtmg_c130628.nc</mam5_mode4_file>
 <mam5_mode5_file rad="rrtmg">atm/cam/physprops/mam5_mode5_rrtmg_sig1.2_dgnl.40_c03072023.nc</mam5_mode5_file>
+
+<!--
+<mam5_mode1_file rad="rrtmg">atm/cam/physprops/mam4_mode1_rrtmg_aeronetdust_sig1.6_dgnh.48_c140304.nc</mam5_mode1_file>
+<mam5_mode2_file rad="rrtmg">atm/cam/physprops/mam4_mode2_rrtmg_aitkendust_c141106.nc</mam5_mode2_file>
+<mam5_mode3_file rad="rrtmg">atm/cam/physprops/mam4_mode3_rrtmg_aeronetdust_c141106.nc</mam5_mode3_file>
+<mam5_mode4_file rad="rrtmg">atm/cam/physprops/mam4_mode4_rrtmg_c130628.nc</mam5_mode4_file>
+<mam5_mode5_file rad="rrtmg">atm/cam/physprops/mam4_mode3_rrtmg_aeronetdust_sig1.2_dgnl.40_c150219.nc</mam5_mode5_file>
+-->
 
 <mam7_mode1_file rad="rrtmg">atm/cam/physprops/mam7_mode1_rrtmg_c120904.nc</mam7_mode1_file>
 <mam7_mode2_file rad="rrtmg">atm/cam/physprops/mam7_mode2_rrtmg_c120904.nc</mam7_mode2_file>
@@ -523,6 +532,7 @@
 <photon_file    chem="waccm_mozart_mam3">atm/waccm/phot/photon_c101203.dat</photon_file>
 <photon_file    chem="waccm_mozart_sulfur">atm/waccm/phot/photon_c101203.dat</photon_file>
 <photon_file    chem="tsmlt_mam4">atm/waccm/phot/photon_c130710.dat</photon_file>
+<photon_file    chem="tsmlt_mam5">atm/waccm/phot/photon_c130710.dat</photon_file>
 <electron_file  >atm/waccm/phot/electron.dat</electron_file>
 <euvac_file     >atm/waccm/phot/euvac.nc</euvac_file>
 
